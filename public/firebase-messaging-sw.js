@@ -1,0 +1,30 @@
+// Scripts for firebase messaging service worker
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
+importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
+
+// Initialize Firebase in service worker
+firebase.initializeApp({
+  apiKey: "AIzaSyD7qYNCeQ5ohL4wYbrHvVmK8ibwH2tNSyo",
+  authDomain: "gen-lang-client-0628217852.firebaseapp.com",
+  projectId: "gen-lang-client-0628217852",
+  storageBucket: "gen-lang-client-0628217852.firebasestorage.app",
+  messagingSenderId: "817551423064",
+  appId: "1:817551423064:web:24b24009b40ba226fdfc2d"
+});
+
+const messaging = firebase.messaging();
+
+messaging.onBackgroundMessage((payload) => {
+  console.log('[firebase-messaging-sw.js] Received background message ', payload);
+  const notificationTitle = payload.notification?.title || 'دفتر الديون المحاسبي';
+  const notificationOptions = {
+    body: payload.notification?.body || 'تنبيه محاسبي جديد',
+    icon: '/favicon.ico',
+    badge: '/favicon.ico',
+    data: payload.data,
+    dir: 'rtl',
+    lang: 'ar'
+  };
+
+  self.registration.showNotification(notificationTitle, notificationOptions);
+});
