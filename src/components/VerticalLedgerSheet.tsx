@@ -35,6 +35,8 @@ import { Invoice, InvoiceItem, Customer, SystemSettings, CustomerChangeLogItem }
 import { printElement, exportElementToPDF } from "../utils/printUtils";
 import CustomerChangeLogTable from "./CustomerChangeLogTable";
 import { formatDebtChangeLogDetails, formatPaymentChangeLogDetails } from "../utils/changeLogUtils";
+import { auth } from "../lib/firebase";
+import { dispatchPaidAmountNotification } from "../lib/notifications";
 
 const BG_COLOR_PRESETS = [
   { id: "classic", name: "ورقي دافئ (دفتر كلاسيكي)", color: "#faf6ef" },
@@ -92,6 +94,15 @@ export default function VerticalLedgerSheet({
   });
   const [showColorPicker, setShowColorPicker] = useState<boolean>(false);
   const colorPickerRef = useRef<HTMLDivElement>(null);
+
+  // Debounce ref to prevent duplicate or keystroke-level notifications for "واصل"
+  const paidCommitDebounceRef = useRef<{ [sepId: string]: NodeJS.Timeout }>({});
+
+  useEffect(() => {
+    return () => {
+      Object.values(paidCommitDebounceRef.current).forEach(clearTimeout);
+    };
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -612,8 +623,31 @@ export default function VerticalLedgerSheet({
     }
   };
 
+  // Helper to calculate remaining balance at the time of a separator
+  const calculateSeparatorRemaining = (sepId: string): number => {
+    let runningDebt = 0;
+    let runningPaid = 0;
+    for (const it of items) {
+      if (it.isSeparator) {
+        runningPaid += Number(it.paidAmount || 0);
+        if (it.id === sepId) {
+          return Math.max(0, runningDebt - runningPaid);
+        }
+      } else if (!it.isPaymentRow && !it.isRemainingRow) {
+        runningDebt += Number(it.total || it.unitPrice || 0);
+      }
+    }
+    return Math.max(0, runningDebt - runningPaid);
+  };
+
   // Commit separator paid logging on blur / Enter
   const handleCommitSeparatorPaidLog = (sepId: string) => {
+    // Clear debounce timer if present
+    if (paidCommitDebounceRef.current[sepId]) {
+      clearTimeout(paidCommitDebounceRef.current[sepId]);
+      delete paidCommitDebounceRef.current[sepId];
+    }
+
     const sep = items.find((it) => it.id === sepId);
     if (!sep || !sep.isSeparator) return;
 
@@ -637,6 +671,24 @@ export default function VerticalLedgerSheet({
           previousState: sep,
         });
       }
+    }
+
+    // 🔔 Trigger Event 3 Notification: سداد جزء من الدين أو كامل الدين
+    // Only fires for the final committed operation, strictly deduplicated by operation ID
+    const currentUserId = auth.currentUser?.uid || invoice.userId;
+    if (currentUserId) {
+      const remainingVal = calculateSeparatorRemaining(sepId);
+      const opId = `${customer.id}_${invoice.id}_${sep.id}_${paid}`;
+
+      dispatchPaidAmountNotification(currentUserId, {
+        operationId: opId,
+        customerId: customer.id,
+        customerName: customer.name || invoice.customerName || "العميل",
+        invoiceId: invoice.id,
+        paidAmount: paid,
+        remainingAmount: remainingVal,
+        currency: settings.currency,
+      }).catch((e) => console.warn("Failed to dispatch paid amount notification:", e));
     }
   };
 
@@ -667,7 +719,7 @@ export default function VerticalLedgerSheet({
     persistChanges(updated);
   };
 
-  // 10. Update paid amount for separator
+  // 10. Update paid amount for separator (updates UI state immediately, debounces commit notification)
   const handleUpdatePaidAmount = (sepId: string, paidValStr: string) => {
     const rawVal = Number(paidValStr.replace(/[^\d.]/g, "")) || 0;
     const todayStr = getCurrentDateFormatted();
@@ -689,6 +741,16 @@ export default function VerticalLedgerSheet({
       return it;
     });
     persistChanges(updated);
+
+    // Debounce commit in case user pauses typing and doesn't press Enter or blur
+    if (paidCommitDebounceRef.current[sepId]) {
+      clearTimeout(paidCommitDebounceRef.current[sepId]);
+    }
+    if (rawVal > 0) {
+      paidCommitDebounceRef.current[sepId] = setTimeout(() => {
+        handleCommitSeparatorPaidLog(sepId);
+      }, 1500);
+    }
   };
 
   // 11. Clear all items from this ledger sheet

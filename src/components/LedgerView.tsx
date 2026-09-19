@@ -67,6 +67,8 @@ import VerticalLedgerSheet from "./VerticalLedgerSheet";
 import DeleteConfirmModal from "./DeleteConfirmModal";
 import HierarchicalFolderNav from "./HierarchicalFolderNav";
 import FileManagerView from "./FileManagerView";
+import { auth } from "../lib/firebase";
+import { dispatchPaidAmountNotification } from "../lib/notifications";
 
 interface LedgerViewProps {
   customers: Customer[];
@@ -1437,6 +1439,7 @@ ${folderCustomers
     const remainingAmount = Math.max(0, grandTotal - paidAmount);
 
     if (editingInvoice) {
+      const prevPaid = Number(editingInvoice.paidAmount || 0);
       updateInvoice({
         ...editingInvoice,
         invoiceNumber: newInvNumber,
@@ -1451,6 +1454,25 @@ ${folderCustomers
         signature: newInvSignature,
         columns: invColumns,
       });
+
+      // 🔔 Trigger Event 3 Notification if paid amount increased in this modal save
+      if (paidAmount > prevPaid) {
+        const currentUserId = auth.currentUser?.uid || editingInvoice.userId;
+        if (currentUserId) {
+          const addedVal = paidAmount - prevPaid;
+          const opId = `${editingInvoice.customerId}_${editingInvoice.id}_modal_${paidAmount}`;
+          dispatchPaidAmountNotification(currentUserId, {
+            operationId: opId,
+            customerId: editingInvoice.customerId,
+            customerName: editingInvoice.customerName || selectedCustomer.name,
+            invoiceId: editingInvoice.id,
+            paidAmount: addedVal,
+            remainingAmount,
+            currency: settings.currency,
+          }).catch((e) => console.warn("Failed to dispatch modal paid amount notification:", e));
+        }
+      }
+
       setEditingInvoice(null);
     } else {
       addInvoice({

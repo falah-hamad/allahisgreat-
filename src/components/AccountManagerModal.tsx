@@ -41,7 +41,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { SystemSettings } from "../types";
 import { db, enableNetwork, waitForPendingWrites } from "../lib/firebase";
-import { requestNotificationPermission, isFCMSupported } from "../lib/notifications";
+import { requestNotificationPermissionDetailed, isFCMSupported } from "../lib/notifications";
 
 interface AccountManagerModalProps {
   isOpen: boolean;
@@ -313,13 +313,36 @@ export default function AccountManagerModal({
         backupAlerts: notifBackup,
         soundAlerts: notifSound,
       });
-      showToast("تم حفظ تفضيلات الإشعارات بنجاح!");
+
+      // If user enabled any alert, check browser permission and obtain FCM token
+      if (notifDueDebt || notifPayments || notifBackup) {
+        if (typeof window !== "undefined" && "Notification" in window) {
+          const currentPerm = Notification.permission;
+          if (currentPerm === "denied") {
+            showToast("تم حفظ التفضيلات، ولكن إشعارات المتصفح محظورة لهذا الموقع. يرجى تفعيلها من إعدادات المتصفح وقفل العنوان.", "error");
+          } else {
+            const res = await requestNotificationPermissionDetailed(currentUser?.uid);
+            if (res.status === "granted") {
+              showToast("تم حفظ التفضيلات وتفعيل إشعارات المتصفح وتأكيد تسجيل الجهاز بنجاح!");
+            } else if (res.status === "denied") {
+              showToast("تم حفظ التفضيلات، ولكن تم رفض إذن إشعارات المتصفح من قبلك.", "error");
+            } else {
+              showToast(res.message || "تم حفظ تفضيلات الإشعارات بنجاح!");
+            }
+          }
+        } else {
+          showToast("تم حفظ تفضيلات الإشعارات بنجاح!");
+        }
+      } else {
+        showToast("تم حفظ تفضيلات الإشعارات بنجاح!");
+      }
     } catch (err: any) {
       showToast("حدث خطأ أثناء حفظ الإشعارات", "error");
     } finally {
       setSaving(false);
     }
   };
+
 
   // 6. Backup & Sync
   const handleManualSync = async () => {

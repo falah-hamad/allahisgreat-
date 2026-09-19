@@ -33,6 +33,7 @@ import {
   getDocs,
   writeBatch,
 } from "firebase/firestore";
+import { dispatchAccountingNotification } from "../lib/notifications";
 
 // Helper to remove undefined properties which Firestore rejects
 function cleanForFirestore<T>(data: T): any {
@@ -990,6 +991,29 @@ export function useAccountingData() {
       }
     }
 
+    // 🔔 Trigger Notification for Event 1: إضافة دين أو قيد جديد
+    if (currentUser) {
+      const custName = newInvoice.customerName || "عميل";
+      const grandAmt = Number(newInvoice.grandTotal || 0).toLocaleString();
+      const curr = settings?.currency || "د.ع";
+      const itemsCount = (newInvoice.items || []).filter((it) => !it.isSeparator && !it.isPaymentRow && !it.isRemainingRow).length;
+      const itemsDesc = itemsCount > 0 ? ` (${itemsCount} مادة)` : "";
+
+      dispatchAccountingNotification(currentUser.uid, {
+        id: `notif_debt_${newInvoice.id}`,
+        title: `قيد دين جديد: ${custName}`,
+        body: `تم تسجيل دين جديد بقيمة ${grandAmt} ${curr}${itemsDesc} في القائمة رقم ${newInvoice.invoiceNumber || ""}`.trim(),
+        category: "debts",
+        data: {
+          invoiceId: newInvoice.id,
+          customerId: newInvoice.customerId,
+          customerName: custName,
+          amount: newInvoice.grandTotal,
+          type: "new_debt",
+        },
+      }).catch((e) => console.warn("Failed to dispatch invoice notification:", e));
+    }
+
     return newInvoice;
   };
 
@@ -1200,6 +1224,28 @@ export function useAccountingData() {
       for (const inv of updatedInvoices) {
         saveToFirestoreDoc("invoices", inv.id, inv).catch((e) => console.error(e));
       }
+
+      // 🔔 Trigger Notification for Event 2: تسجيل دفعة أو سند قبض
+      const custName = newPayment.customerName || "العميل";
+      const payAmt = Number(newPayment.amount || 0).toLocaleString();
+      const curr = settings?.currency || "د.ع";
+      const methodText = newPayment.method ? ` (${newPayment.method})` : "";
+      const notesDesc = newPayment.notes ? ` — ${newPayment.notes}` : "";
+
+      dispatchAccountingNotification(currentUser.uid, {
+        id: `notif_payment_${newPayment.id}`,
+        title: `سند قبض / دفعة مسجلة: ${custName}`,
+        body: `تم استلام دفعة نقدية بقيمة ${payAmt} ${curr}${methodText}${notesDesc}`.trim(),
+        category: "payments",
+        data: {
+          paymentId: newPayment.id,
+          customerId: newPayment.customerId,
+          customerName: custName,
+          amount: newPayment.amount,
+          method: newPayment.method,
+          type: "payment_receipt",
+        },
+      }).catch((e) => console.warn("Failed to dispatch payment notification:", e));
     }
 
     return newPayment;

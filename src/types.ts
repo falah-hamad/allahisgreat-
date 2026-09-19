@@ -144,3 +144,24 @@ export interface CloudBackupItem {
   payloadJson: string;
 }
 
+export type NotificationCategory =
+  | "debts"          // الديون
+  | "payments"       // الدفعات
+  | "due_debts"      // المستحقات والمتأخرات
+  | "backup"         // النسخ الاحتياطي
+  | "account"        // الحساب والأمان
+  | "system_updates" // تحديثات التطبيق
+  | "general";       // عامة
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  category: NotificationCategory;
+  isRead: boolean;
+  createdAt: string; // ISO string
+  data?: Record<string, any>;
+}
+
+

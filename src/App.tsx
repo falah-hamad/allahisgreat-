@@ -1,11 +1,22 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
-import { Menu, Calendar, BookOpen, User, Building2, ShieldAlert, BellRing, LogOut, Cloud, WifiOff, Wifi } from "lucide-react";
+import { Menu, Calendar, BookOpen, User, Building2, ShieldAlert, BellRing, Bell, LogOut, Cloud, WifiOff, Wifi } from "lucide-react";
 import { useAccountingData } from "./hooks/useAccountingData";
 import { isInvoiceOverdue } from "./utils/overdueUtils";
 import { useAuth } from "./contexts/AuthContext";
-import { setupForegroundNotificationListener, registerDeviceToken } from "./lib/notifications";
+import {
+  setupForegroundNotificationListener,
+  registerDeviceToken,
+  subscribeAppNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
+  clearAllNotifications,
+} from "./lib/notifications";
 import AuthModal from "./components/AuthModal";
 import AccountManagerModal from "./components/AccountManagerModal";
+import NotificationCenterModal from "./components/NotificationCenterModal";
+import { AppNotification } from "./types";
+
 
 // Views
 import Sidebar from "./components/Sidebar";
@@ -77,9 +88,12 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [notificationsList, setNotificationsList] = useState<AppNotification[]>([]);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [showReconnectedBanner, setShowReconnectedBanner] = useState<boolean>(false);
   const hadBeenOfflineRef = useRef<boolean>(!navigator.onLine);
+
 
   useEffect(() => {
     let reconnectTimeout: any = null;
@@ -125,20 +139,31 @@ export default function App() {
 
   useEffect(() => {
     if (currentUser) {
-      let cleanup: (() => void) | null = null;
+      let cleanupForeground: (() => void) | null = null;
       setupForegroundNotificationListener((payload) => {
         console.log("Push notification received in foreground:", payload);
       }).then((unsub) => {
-        if (unsub) cleanup = unsub;
+        if (unsub) cleanupForeground = unsub;
       });
+
       registerDeviceToken(currentUser.uid).catch((e) => {
-        console.warn("FCM device token registration skipped or blocked in iframe:", e);
+        console.warn("FCM device token registration notice:", e);
       });
+
+      // Subscribe to real-time synchronized Firestore in-app notifications
+      const unsubscribeNotifications = subscribeAppNotifications(currentUser.uid, (items) => {
+        setNotificationsList(items);
+      });
+
       return () => {
-        if (cleanup) cleanup();
+        if (cleanupForeground) cleanupForeground();
+        unsubscribeNotifications();
       };
+    } else {
+      setNotificationsList([]);
     }
   }, [currentUser]);
+
 
   // Quick export backup helper for Account Manager
   const handleExportBackup = () => {
@@ -341,8 +366,27 @@ export default function App() {
               </span>
             </div>
 
+            {/* Notification Bell Icon */}
+            <button
+              type="button"
+              id="header-btn-notification-center"
+              onClick={() => setIsNotificationCenterOpen(true)}
+              title="مركز الإشعارات والتنبيهات"
+              className="relative p-2 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            >
+              <Bell className="w-4 h-4" />
+              {notificationsList.filter((n) => !n.isRead).length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-rose-600 text-[10px] font-bold text-white shadow-2xs animate-pulse">
+                  {notificationsList.filter((n) => !n.isRead).length > 99
+                    ? "99+"
+                    : notificationsList.filter((n) => !n.isRead).length}
+                </span>
+              )}
+            </button>
+
             {/* User Profile and Cloud State display */}
             <div className="flex items-center gap-2 sm:gap-3">
+
               {currentUser ? (
                 <>
                   <button
@@ -597,7 +641,54 @@ export default function App() {
           onImportData={importData}
         />
 
+        {/* Notification Center Modal */}
+        <NotificationCenterModal
+          isOpen={isNotificationCenterOpen}
+          onClose={() => setIsNotificationCenterOpen(false)}
+          notifications={notificationsList}
+          onMarkAsRead={(id) => {
+            if (currentUser) {
+              markNotificationAsRead(currentUser.uid, id);
+            } else {
+              setNotificationsList((prev) =>
+                prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
+              );
+            }
+          }}
+          onMarkAllAsRead={() => {
+            if (currentUser) {
+              markAllNotificationsAsRead(currentUser.uid, notificationsList);
+            } else {
+              setNotificationsList((prev) => prev.map((n) => ({ ...n, isRead: true })));
+            }
+          }}
+          onDeleteNotification={(id) => {
+            if (currentUser) {
+              deleteNotification(currentUser.uid, id);
+            } else {
+              setNotificationsList((prev) => prev.filter((n) => n.id !== id));
+            }
+          }}
+          onClearAll={() => {
+            if (currentUser) {
+              clearAllNotifications(currentUser.uid, notificationsList);
+            } else {
+              setNotificationsList([]);
+            }
+          }}
+          onSelectNotificationAction={(n) => {
+            if (n.category === "due_debts") {
+              setCurrentTab("overdue");
+            } else if (n.category === "debts" || n.category === "payments") {
+              setCurrentTab("ledger");
+            } else if (n.category === "backup" || n.category === "account") {
+              setIsAccountModalOpen(true);
+            }
+          }}
+        />
+
         {/* Auth Modal for guest users seeking cloud sync */}
+
         {isAuthModalOpen && (
           <AuthModal
             onSuccess={() => setIsAuthModalOpen(false)}
