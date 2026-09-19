@@ -18,6 +18,12 @@ import {
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  persistentSingleTabManager,
+  memoryLocalCache,
+  CACHE_SIZE_UNLIMITED,
+  enableNetwork,
+  disableNetwork,
+  waitForPendingWrites,
   doc, 
   getDocFromServer,
   collection,
@@ -38,24 +44,71 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App
 export const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with multi-tab offline persistence & specific database ID
-let firestoreInstance;
-try {
-  firestoreInstance = initializeFirestore(app, {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager()
-    }),
-    experimentalForceLongPolling: true,
-  }, firebaseConfig.firestoreDatabaseId);
-} catch (e) {
-  // Fallback if initializeFirestore was already called or in restricted environment
+// Initialize Firestore with robust multi-tab offline persistence & fallbacks on the correct database ID
+const targetDatabaseId = firebaseConfig.firestoreDatabaseId || undefined;
+
+function createFirestoreInstance() {
+  // 1. First priority: Multi-tab persistent local cache with unlimited cache size
   try {
-    firestoreInstance = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-  } catch {
-    firestoreInstance = getFirestore(app);
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+      }),
+      experimentalForceLongPolling: true,
+    }, targetDatabaseId);
+  } catch (errMultiTab) {
+    console.warn("Firestore multi-tab persistence notice, trying single-tab fallback:", errMultiTab);
+  }
+
+  // 2. Second priority: Single-tab persistent local cache with unlimited cache size
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentSingleTabManager({}),
+        cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+      }),
+      experimentalForceLongPolling: true,
+    }, targetDatabaseId);
+  } catch (errSingleTab) {
+    console.warn("Firestore single-tab persistence fallback notice:", errSingleTab);
+  }
+
+  // 3. Fallback: Memory cache if IndexedDB is blocked or unavailable
+  try {
+    return initializeFirestore(app, {
+      localCache: memoryLocalCache(),
+      experimentalForceLongPolling: true,
+    }, targetDatabaseId);
+  } catch (errMemory) {
+    // 4. Fallback if instance was already initialized
+    try {
+      return getFirestore(app, targetDatabaseId);
+    } catch {
+      return getFirestore(app);
+    }
   }
 }
-export const db = firestoreInstance;
+
+export const db = createFirestoreInstance();
+
+// Export network synchronization utilities
+export { enableNetwork, disableNetwork, waitForPendingWrites };
+
+// Automatically manage Firestore network connection on browser online/offline events
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    enableNetwork(db).catch(() => {
+      // Ignored: already enabled or auto-reconnected
+    });
+  });
+
+  window.addEventListener('offline', () => {
+    disableNetwork(db).catch(() => {
+      // Ignored: already disabled
+    });
+  });
+}
 
 // Initialize Authentication
 export const auth = getAuth(app);

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useMemo, useEffect } from "react";
-import { Menu, Calendar, BookOpen, User, Building2, ShieldAlert, BellRing, LogOut, Cloud, WifiOff } from "lucide-react";
+import { Menu, Calendar, BookOpen, User, Building2, ShieldAlert, BellRing, LogOut, Cloud, WifiOff, Wifi } from "lucide-react";
 import { useAccountingData } from "./hooks/useAccountingData";
 import { isInvoiceOverdue } from "./utils/overdueUtils";
 import { useAuth } from "./contexts/AuthContext";
@@ -78,15 +78,33 @@ export default function App() {
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [showReconnectedBanner, setShowReconnectedBanner] = useState<boolean>(false);
+  const hadBeenOfflineRef = useRef<boolean>(!navigator.onLine);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    let reconnectTimeout: any = null;
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (hadBeenOfflineRef.current) {
+        setShowReconnectedBanner(true);
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => {
+          setShowReconnectedBanner(false);
+        }, 4000);
+      }
+      hadBeenOfflineRef.current = false;
+    };
+    const handleOffline = () => {
+      hadBeenOfflineRef.current = true;
+      setIsOnline(false);
+      setShowReconnectedBanner(false);
+    };
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
   }, []);
 
@@ -382,13 +400,18 @@ export default function App() {
           </div>
         </header>
 
-        {/* Offline notification banner */}
-        {!isOnline && (
+        {/* Offline notification banner & reconnection indicator */}
+        {!isOnline ? (
           <div className="bg-amber-500 text-white px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all animate-in fade-in">
             <WifiOff className="w-4 h-4" />
             <span>أنت تعمل الآن في وضع عدم الاتصال (Offline Mode) — سيتم حفظ وتخزين كافة عملياتك ومزامنتها تلقائياً مع Firebase فور عودة الإنترنت.</span>
           </div>
-        )}
+        ) : showReconnectedBanner ? (
+          <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all animate-in fade-in">
+            <Wifi className="w-4 h-4" />
+            <span>تمت استعادة الاتصال بالإنترنت — جاري مزامنة التغييرات المحلية تلقائياً مع Cloud Firestore.</span>
+          </div>
+        ) : null}
 
         {/* Dynamic Main Workspace Panels */}
         <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">

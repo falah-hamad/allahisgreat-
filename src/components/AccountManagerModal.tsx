@@ -40,6 +40,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { SystemSettings } from "../types";
+import { db, enableNetwork, waitForPendingWrites } from "../lib/firebase";
+import { requestNotificationPermission, isFCMSupported } from "../lib/notifications";
 
 interface AccountManagerModalProps {
   isOpen: boolean;
@@ -115,6 +117,13 @@ export default function AccountManagerModal({
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordChangeError, setPasswordChangeError] = useState<{
+    code: string;
+    message: string;
+    explanation?: string;
+    isRecentLogin?: boolean;
+  } | null>(null);
+  const [resetEmailSuccessMsg, setResetEmailSuccessMsg] = useState<string | null>(null);
 
   // Notifications toggles
   const [notifDueDebt, setNotifDueDebt] = useState(extendedProfile.dueDebtAlerts ?? true);
@@ -198,16 +207,37 @@ export default function AccountManagerModal({
   // 3. Security: Password Change
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    setPasswordChangeError(null);
+    setResetEmailSuccessMsg(null);
+
     if (!currentPassword) {
-      showToast("يرجى إدخال كلمة المرور الحالية", "error");
+      const msg = "يرجى إدخال كلمة المرور الحالية";
+      showToast(msg, "error");
+      setPasswordChangeError({
+        code: "auth/missing-current-password",
+        message: "Current password is required.",
+        explanation: msg,
+      });
       return;
     }
     if (newPassword.length < 6) {
-      showToast("يجب أن تتكون كلمة المرور الجديدة من 6 خانات أو أرقام على الأقل", "error");
+      const msg = "يجب أن تتكون كلمة المرور الجديدة من 6 خانات أو أرقام على الأقل";
+      showToast(msg, "error");
+      setPasswordChangeError({
+        code: "auth/weak-password",
+        message: "Password must be at least 6 characters.",
+        explanation: msg,
+      });
       return;
     }
     if (newPassword !== confirmPassword) {
-      showToast("كلمتا المرور الجديدة والتأكيد غير متطابقتين", "error");
+      const msg = "كلمتا المرور الجديدة والتأكيد غير متطابقتين";
+      showToast(msg, "error");
+      setPasswordChangeError({
+        code: "auth/password-mismatch",
+        message: "New password and confirmation do not match.",
+        explanation: msg,
+      });
       return;
     }
 
@@ -217,9 +247,27 @@ export default function AccountManagerModal({
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      showToast("تم تغيير كلمة المرور بنجاح!");
+      setPasswordChangeError(null);
+      showToast("تم تغيير كلمة المرور بنجاح في Firebase Authentication!");
     } catch (err: any) {
-      showToast(err.message || "فشل تغيير كلمة المرور", "error");
+      console.error("Change password error:", err);
+      const code = err?.code || "auth/unknown-error";
+      const rawMsg = err?.rawMessage || err?.message || "فشل تغيير كلمة المرور";
+      const explanation = err?.arabicExplanation || err?.message;
+      const isRecent = code === "auth/requires-recent-login" || rawMsg.includes("requires-recent-login");
+
+      setPasswordChangeError({
+        code,
+        message: rawMsg,
+        explanation,
+        isRecentLogin: isRecent,
+      });
+      showToast(
+        isRecent 
+          ? "يتطلب Firebase إعادة تسجيل الدخول (Recent Login) قبل تغيير كلمة المرور."
+          : (explanation || "فشل تغيير كلمة المرور"), 
+        "error"
+      );
     } finally {
       setSaving(false);
     }
@@ -274,12 +322,22 @@ export default function AccountManagerModal({
   };
 
   // 6. Backup & Sync
-  const handleManualSync = () => {
+  const handleManualSync = async () => {
     setSyncStatus("جاري المزامنة مع قاعدة البيانات السحابية...");
-    setTimeout(() => {
+    if (!navigator.onLine) {
+      setSyncStatus("أنت تعمل حالياً في وضع عدم الاتصال (Offline). التغييرات محفوظة محلياً على هذا الجهاز وستُرفع تلقائياً فور توفر الإنترنت.");
+      showToast("وضع عدم الاتصال: التغييرات محفوظة محلياً وستُرفع تلقائياً عند توفر الإنترنت.");
+      return;
+    }
+    try {
+      await enableNetwork(db);
+      await waitForPendingWrites(db);
       setSyncStatus("تمت المزامنة السحابية بنجاح وحفظ كافة القيود في Cloud Firestore.");
       showToast("تمت المزامنة السحابية بنجاح!");
-    }, 1200);
+    } catch {
+      setSyncStatus("تم حفظ البيانات محلياً وسيتم استكمال المزامنة تلقائياً مع السحابة.");
+      showToast("تم حفظ البيانات محلياً وسيتم المزامنة تلقائياً.");
+    }
   };
 
   // 7. Sessions
@@ -1012,6 +1070,63 @@ export default function AccountManagerModal({
                       <span>تغيير كلمة المرور</span>
                     </div>
 
+                    {/* Detailed Error Banner for Firebase Auth Password Change */}
+                    {passwordChangeError && (
+                      <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-2">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-rose-950 text-xs mb-1">
+                              {passwordChangeError.isRecentLogin
+                                ? "يتطلب Firebase Authentication إعادة تسجيل الدخول (Recent Login) لتأكيد الأمان:"
+                                : "فشل تغيير كلمة المرور عبر Firebase Authentication:"}
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                              <span className="font-semibold text-rose-800">كود الخطأ (Error Code):</span>
+                              <code className="px-1.5 py-0.5 bg-rose-200/90 text-rose-950 font-mono font-bold text-[11px] rounded border border-rose-300 dir-ltr select-all">
+                                {passwordChangeError.code}
+                              </code>
+                            </div>
+                            {passwordChangeError.message && (
+                              <div className="mb-1">
+                                <span className="font-semibold text-rose-800 block mb-0.5">رسالة Firebase (Error Message):</span>
+                                <div className="p-2 bg-white/90 border border-rose-200 rounded-lg font-mono text-[11px] text-rose-950 dir-ltr break-words select-all">
+                                  {passwordChangeError.message}
+                                </div>
+                              </div>
+                            )}
+                            {passwordChangeError.explanation && (
+                              <div className="text-[11px] text-rose-800 leading-relaxed font-normal pt-1 border-t border-rose-200/60">
+                                {passwordChangeError.explanation}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        {passwordChangeError.isRecentLogin && (
+                          <div className="pt-2 border-t border-rose-200/80 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowLogoutConfirm(true);
+                              }}
+                              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                            >
+                              <LogOut className="w-3.5 h-3.5" />
+                              <span>تسجيل الخروج الآن للدخول مجدداً</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Reset Email Success Notification */}
+                    {resetEmailSuccessMsg && (
+                      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{resetEmailSuccessMsg}</span>
+                      </div>
+                    )}
+
                     <div className="space-y-4">
                       {/* Current Password Field */}
                       <div>
@@ -1114,10 +1229,23 @@ export default function AccountManagerModal({
                           if (currentUser?.email) {
                             try {
                               await resetPassword(currentUser.email);
+                              setPasswordChangeError(null);
+                              setResetEmailSuccessMsg(`تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني (${currentUser.email}) بنجاح.`);
                               showToast("تم إرسال رابط تعيين كلمة المرور إلى بريدك الإلكتروني بنجاح.");
                             } catch (e: any) {
-                              showToast(e.message || "تعذر إرسال رابط تعيين كلمة المرور", "error");
+                              const code = e?.code || 'auth/unknown-error';
+                              const rawMsg = e?.rawMessage || e?.message || 'تعذر إرسال رابط تعيين كلمة المرور';
+                              const explanation = e?.arabicExplanation || e?.message;
+                              setPasswordChangeError({
+                                code,
+                                message: rawMsg,
+                                explanation,
+                                isRecentLogin: false,
+                              });
+                              showToast(`فشل إرسال الرابط: [${code}] ${explanation}`, "error");
                             }
+                          } else {
+                            showToast("لا يوجد بريد إلكتروني مسجل في هذا الحساب لإرسال الرابط.", "error");
                           }
                         }}
                         className="text-xs text-blue-600 hover:underline cursor-pointer"

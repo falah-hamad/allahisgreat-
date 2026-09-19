@@ -49,7 +49,6 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
     confirmNewPassword,
     sendPhoneOtp,
     verifyPhoneOtp,
-    loginWithPhoneSimulated,
     authError,
     setAuthError
   } = useAuth();
@@ -71,12 +70,37 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
   const [countrySearch, setCountrySearch] = useState('');
   const [phoneNumberInput, setPhoneNumberInput] = useState('');
   const [phoneMerchantName, setPhoneMerchantName] = useState('');
-  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | any | null>(null);
+  const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [sendingOtp, setSendingOtp] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [phoneRegionBlocked, setPhoneRegionBlocked] = useState(false);
+  const [phoneErrorDetails, setPhoneErrorDetails] = useState<{
+    code: string;
+    message: string;
+    isRecaptcha?: boolean;
+    explanation?: string;
+  } | null>(null);
+
+  // States for handling Password Reset / Change Error Details
+  const [forgotErrorDetails, setForgotErrorDetails] = useState<{
+    code: string;
+    message: string;
+    explanation?: string;
+  } | null>(null);
+
+  // Clean up recaptcha verifier on unmount
+  useEffect(() => {
+    return () => {
+      if ((window as any).phoneRecaptchaVerifier) {
+        try {
+          (window as any).phoneRecaptchaVerifier.clear();
+        } catch (e) {}
+        (window as any).phoneRecaptchaVerifier = null;
+      }
+    };
+  }, []);
 
   // States for handling incoming password reset link via oobCode
   const [resetCode, setResetCode] = useState<string>('');
@@ -210,21 +234,34 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
   };
 
   // Handler for Forgot Password (sending reset link via Firebase Auth)
-  const handleForgotSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleForgotSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setSuccessMessage(null);
     setAuthError(null);
+    setForgotErrorDetails(null);
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
-      setAuthError('يرجى إدخال البريد الإلكتروني.');
+      const msg = 'يرجى إدخال البريد الإلكتروني.';
+      setAuthError(msg);
+      setForgotErrorDetails({
+        code: 'auth/missing-email',
+        message: 'Missing email address.',
+        explanation: msg,
+      });
       return;
     }
 
     // Strict email format validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanEmail)) {
-      setAuthError('صيغة البريد الإلكتروني غير صالحة. يرجى كتابة عنوان صحيح (مثال: name@example.com).');
+      const msg = 'صيغة البريد الإلكتروني غير صالحة. يرجى كتابة عنوان صحيح (مثال: name@example.com).';
+      setAuthError(msg);
+      setForgotErrorDetails({
+        code: 'auth/invalid-email',
+        message: 'Invalid email format.',
+        explanation: msg,
+      });
       return;
     }
 
@@ -233,7 +270,14 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
       await resetPassword(cleanEmail);
       setSuccessMessage(`تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني (${cleanEmail}) بنجاح.`);
     } catch (err: any) {
-      // Handled in context and setAuthError
+      console.error('Password reset error in modal:', err);
+      const code = err?.code || 'auth/unknown-error';
+      const rawMsg = err?.rawMessage || err?.message || 'فشل إرسال رابط إعادة تعيين كلمة المرور.';
+      setForgotErrorDetails({
+        code,
+        message: rawMsg,
+        explanation: err?.arabicExplanation,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -243,14 +287,27 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
   const handleConfirmNewPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setForgotErrorDetails(null);
 
     if (newPassword.length < 6) {
-      setAuthError('كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف أو أرقام.');
+      const msg = 'كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف أو أرقام.';
+      setAuthError(msg);
+      setForgotErrorDetails({
+        code: 'auth/weak-password',
+        message: 'Password must be at least 6 characters.',
+        explanation: msg,
+      });
       return;
     }
 
     if (newPassword !== confirmNewPasswordInput) {
-      setAuthError('كلمة المرور وتأكيدها غير متطابقين.');
+      const msg = 'كلمة المرور وتأكيدها غير متطابقين.';
+      setAuthError(msg);
+      setForgotErrorDetails({
+        code: 'auth/password-mismatch',
+        message: 'Passwords do not match.',
+        explanation: msg,
+      });
       return;
     }
 
@@ -267,7 +324,14 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
         window.history.replaceState({}, document.title, url.pathname);
       } catch {}
     } catch (err: any) {
-      // Handled in context
+      console.error('Confirm new password error:', err);
+      const code = err?.code || 'auth/unknown-error';
+      const rawMsg = err?.rawMessage || err?.message || 'فشل تعيين كلمة المرور الجديدة.';
+      setForgotErrorDetails({
+        code,
+        message: rawMsg,
+        explanation: err?.arabicExplanation,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -303,39 +367,28 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
     };
   }, [countdown, mode, phoneStep]);
 
-  // Quick preview / simulated phone OTP when Firebase restricts SMS region or for instant testing
-  const handleStartQuickDemoPhone = () => {
-    setAuthError(null);
-    const cleanNumber = phoneNumberInput.trim() || '7701234567';
-    const fullPhone = formatInternationalPhoneNumber(selectedCountry.code, cleanNumber);
-    setPhoneNumberInput(cleanNumber);
-    setConfirmationResult({
-      isSimulation: true,
-      phoneNumber: fullPhone,
-      verificationId: 'simulated_' + Date.now(),
-      confirm: async () => ({ user: { uid: 'phone_' + fullPhone.replace(/\D/g, '') } })
-    });
-    setPhoneStep('otp');
-    setCountdown(0);
-    setOtpCode('123456');
-    setSuccessMessage(`تم تفعيل وضع المعاينة الفوري للرقم ${fullPhone}! أدخل رمز التحقق: 123456 لإكمال الدخول.`);
-  };
-
   // Send real SMS OTP using Firebase Authentication
   const handleSendPhoneOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setAuthError(null);
+    setPhoneErrorDetails(null);
     setSuccessMessage(null);
 
     const cleanNumber = phoneNumberInput.trim();
     if (!cleanNumber) {
-      setAuthError('يرجى إدخال رقم الهاتف.');
+      const code = 'auth/missing-phone-number';
+      const message = 'يرجى إدخال رقم الهاتف مصحوباً برمز الدولة.';
+      setPhoneErrorDetails({ code, message });
+      setAuthError(`${message}\nكود الخطأ (Code): ${code}`);
       return;
     }
 
     const fullPhone = formatInternationalPhoneNumber(selectedCountry.code, cleanNumber);
     if (fullPhone.length < 8) {
-      setAuthError('رقم الهاتف قصير جداً وغير مكتمل. يرجى التأكد من الرقم.');
+      const code = 'auth/invalid-phone-number';
+      const message = 'رقم الهاتف غير صالح أو قصير جداً. يرجى التأكد من كتابة الرقم كاملاً بالصيغة الدولية (+964...).';
+      setPhoneErrorDetails({ code, message });
+      setAuthError(`${message}\nكود الخطأ (Code): ${code}`);
       return;
     }
 
@@ -348,11 +401,23 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
       setOtpCode('');
       setSuccessMessage(`تم إرسال رمز التحقق SMS بنجاح إلى الرقم ${fullPhone}`);
       setPhoneRegionBlocked(false);
+      setPhoneErrorDetails(null);
     } catch (err: any) {
       console.error('Phone OTP error:', err);
-      const raw = (err?.rawMessage || err?.message || '').toLowerCase();
+      const code = err?.code || (err?.name && err?.name !== 'Error' ? err.name : 'auth/unknown-error');
+      const rawMsg = err?.rawMessage || err?.message || String(err || '');
+      const isRecaptcha = err?.isRecaptcha || code.includes('captcha') || rawMsg.toLowerCase().includes('recaptcha');
+      
+      setPhoneErrorDetails({
+        code,
+        message: rawMsg,
+        isRecaptcha,
+        explanation: err?.arabicExplanation,
+      });
+
+      const raw = rawMsg.toLowerCase();
       if (
-        err?.code === 'auth/operation-not-allowed' ||
+        code === 'auth/operation-not-allowed' ||
         raw.includes('region enabled') ||
         raw.includes('sms unable to be sent') ||
         raw.includes('sms region policy')
@@ -370,38 +435,44 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
     await handleSendPhoneOtp();
   };
 
-  // Verify Phone OTP
+  // Verify Phone OTP with Firebase confirmationResult.confirm
   const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setPhoneErrorDetails(null);
     setSuccessMessage(null);
 
     const cleanOtp = otpCode.trim();
     if (!cleanOtp || cleanOtp.length < 6) {
-      setAuthError('يرجى إدخال رمز التحقق المكون من 6 أرقام كاملاً.');
+      const code = 'auth/invalid-verification-code';
+      const message = 'يرجى إدخال رمز التحقق المكون من 6 أرقام كاملاً.';
+      setPhoneErrorDetails({ code, message });
+      setAuthError(`${message}\nكود الخطأ (Code): ${code}`);
       return;
     }
 
     if (!confirmationResult) {
-      setAuthError('انتهت صلاحية جلسة التحقق، يرجى إعادة إرسال الرمز.');
+      const code = 'auth/session-expired';
+      const message = 'انتهت صلاحية جلسة التحقق، يرجى إعادة إرسال الرمز.';
+      setPhoneErrorDetails({ code, message });
+      setAuthError(`${message}\nكود الخطأ (Code): ${code}`);
       return;
     }
 
     setVerifyingOtp(true);
     try {
-      if ((confirmationResult as any)?.isSimulation) {
-        const fullPhone = (confirmationResult as any).phoneNumber || formatInternationalPhoneNumber(selectedCountry.code, phoneNumberInput.trim() || '7701234567');
-        await loginWithPhoneSimulated(fullPhone, phoneMerchantName.trim() || undefined);
-        onSuccess?.();
-        onClose?.();
-        return;
-      }
-
       await verifyPhoneOtp(confirmationResult, cleanOtp, phoneMerchantName.trim() || undefined);
       onSuccess?.();
       onClose?.();
     } catch (err: any) {
       console.error('Verify phone error:', err);
+      const code = err?.code || 'auth/unknown-error';
+      const rawMsg = err?.rawMessage || err?.message || 'فشل التحقق من رمز OTP.';
+      setPhoneErrorDetails({
+        code,
+        message: rawMsg,
+        explanation: err?.arabicExplanation,
+      });
     } finally {
       setVerifyingOtp(false);
     }
@@ -484,7 +555,7 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
             <button
               type="button"
               id="tab-login"
-              onClick={() => { setMode('login'); setAuthError(null); setSuccessMessage(null); }}
+              onClick={() => { setMode('login'); setAuthError(null); setPhoneErrorDetails(null); setSuccessMessage(null); }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 mode === 'login' 
                   ? 'bg-white text-blue-700 shadow-sm' 
@@ -496,7 +567,7 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
             <button
               type="button"
               id="tab-phone"
-              onClick={() => { setMode('phone'); setPhoneStep('input'); setAuthError(null); setSuccessMessage(null); }}
+              onClick={() => { setMode('phone'); setPhoneStep('input'); setAuthError(null); setPhoneErrorDetails(null); setSuccessMessage(null); }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 ${
                 mode === 'phone' 
                   ? 'bg-white text-blue-700 shadow-sm' 
@@ -509,7 +580,7 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
             <button
               type="button"
               id="tab-register"
-              onClick={() => { setMode('register'); setAuthError(null); setSuccessMessage(null); }}
+              onClick={() => { setMode('register'); setAuthError(null); setPhoneErrorDetails(null); setSuccessMessage(null); }}
               className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                 mode === 'register' 
                   ? 'bg-white text-blue-700 shadow-sm' 
@@ -524,10 +595,81 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
         <div className="p-6">
           {/* Status Notifications */}
           {authError && (
-            <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
-              <div className="flex items-start gap-2 mb-1">
+            <div id="auth-error-banner" className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs">
+              <div className="flex items-start gap-2.5 mb-1">
                 <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
-                <div className="leading-relaxed font-bold">{authError}</div>
+                <div className="flex-1 min-w-0">
+                  {mode === 'phone' && phoneErrorDetails ? (
+                    <div className="space-y-2">
+                      <div className="font-bold text-rose-950 text-xs">
+                        فشل إرسال رمز التحقق SMS عبر Firebase:
+                      </div>
+
+                      {/* Firebase Error Code */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-rose-800">كود الخطأ (Error Code):</span>
+                        <code className="px-2 py-0.5 bg-rose-200/90 text-rose-950 font-mono font-bold text-[11px] rounded border border-rose-300 dir-ltr select-all">
+                          {phoneErrorDetails.code}
+                        </code>
+                      </div>
+
+                      {/* Firebase Error Message */}
+                      <div>
+                        <span className="font-semibold text-rose-800 block mb-0.5">رسالة Firebase (Error Message):</span>
+                        <div className="p-2 bg-white/90 border border-rose-200 rounded-lg font-mono text-[11px] text-rose-950 dir-ltr break-words leading-relaxed select-all">
+                          {phoneErrorDetails.message}
+                        </div>
+                      </div>
+
+                      {/* reCAPTCHA specific alert if applicable */}
+                      {phoneErrorDetails.isRecaptcha && (
+                        <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] font-semibold">
+                          ⚠️ خطأ متعلق بـ reCAPTCHA: حدثت مشكلة أثناء فحص الأمان reCAPTCHA. يرجى التأكد من اتصال الإنترنت أو تحديث الصفحة.
+                        </div>
+                      )}
+
+                      {/* Arabic Explanation if available */}
+                      {phoneErrorDetails.explanation && (
+                        <div className="text-[11px] text-rose-800 leading-relaxed font-normal pt-1 border-t border-rose-200/60">
+                          {phoneErrorDetails.explanation}
+                        </div>
+                      )}
+                    </div>
+                  ) : (mode === 'forgot' || mode === 'resetPassword') && forgotErrorDetails ? (
+                    <div className="space-y-2">
+                      <div className="font-bold text-rose-950 text-xs">
+                        {mode === 'forgot'
+                          ? 'فشل إرسال رسالة إعادة تعيين كلمة المرور عبر Firebase Authentication:'
+                          : 'فشل حفظ وتحديث كلمة المرور الجديدة عبر Firebase Authentication:'}
+                      </div>
+
+                      {/* Firebase Error Code */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-rose-800">كود الخطأ (Error Code):</span>
+                        <code className="px-2 py-0.5 bg-rose-200/90 text-rose-950 font-mono font-bold text-[11px] rounded border border-rose-300 dir-ltr select-all">
+                          {forgotErrorDetails.code}
+                        </code>
+                      </div>
+
+                      {/* Firebase Error Message */}
+                      <div>
+                        <span className="font-semibold text-rose-800 block mb-0.5">رسالة Firebase (Error Message):</span>
+                        <div className="p-2 bg-white/90 border border-rose-200 rounded-lg font-mono text-[11px] text-rose-950 dir-ltr break-words leading-relaxed select-all">
+                          {forgotErrorDetails.message}
+                        </div>
+                      </div>
+
+                      {/* Arabic Explanation if available */}
+                      {forgotErrorDetails.explanation && (
+                        <div className="text-[11px] text-rose-800 leading-relaxed font-normal pt-1 border-t border-rose-200/60">
+                          {forgotErrorDetails.explanation}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="leading-relaxed font-bold whitespace-pre-line break-words">{authError}</div>
+                  )}
+                </div>
               </div>
 
               {/* Actionable solutions for social login / popup cancellation */}
@@ -575,22 +717,13 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
                   <div className="flex flex-wrap gap-2 text-[11px]">
                     <button
                       type="button"
-                      id="btn-phone-quick-demo-otp"
-                      onClick={handleStartQuickDemoPhone}
+                      id="btn-phone-retry-send"
+                      onClick={() => handleSendPhoneOtp()}
                       className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>المتابعة فوراً برمز المعاينة (123456)</span>
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>إعادة محاولة إرسال الرمز</span>
                     </button>
-                    <a
-                      href="https://console.firebase.google.com/project/gen-lang-client-0628217852/authentication/settings"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-2.5 py-1 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-                    >
-                      <ExternalLink className="w-3 h-3" />
-                      <span>إعدادات Firebase Console</span>
-                    </a>
                     <button
                       type="button"
                       onClick={() => handleSocialLogin('google')}
@@ -607,8 +740,46 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
                       <span>المتابعة بالوضع المحلي</span>
                     </button>
                   </div>
-                  <div className="text-[11px] text-rose-800 bg-rose-100/70 p-2 rounded-lg leading-relaxed border border-rose-200/60">
-                    💡 <strong>سبب التنبيه:</strong> سياسة مناطق SMS في Google Firebase تمنع إرسال SMS تلقائياً لحين تفعيل رمز الدولة في <span className="font-semibold dir-ltr">Authentication &gt; Settings &gt; SMS Region Policy</span>، أو إضافة الرقم في <span className="font-semibold dir-ltr">Sign-in method &gt; Phone &gt; Phone numbers for testing</span> مع رمز افتراضي (مثل: 123456).
+                </div>
+              )}
+
+              {/* Actionable solutions for Forgot Password */}
+              {mode === 'forgot' && (
+                <div className="pt-2.5 border-t border-rose-200/80 space-y-2 mt-2">
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => handleForgotSubmit()}
+                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>إعادة محاولة الإرسال</span>
+                    </button>
+                    {forgotErrorDetails?.code === 'auth/user-not-found' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('register');
+                          setAuthError(null);
+                          setForgotErrorDetails(null);
+                        }}
+                        className="px-2.5 py-1 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                      >
+                        <span>إنشاء حساب بهذا البريد</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('login');
+                        setAuthError(null);
+                        setForgotErrorDetails(null);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                    >
+                      <ArrowRight className="w-3 h-3 rotate-180" />
+                      <span>الرجوع لتسجيل الدخول</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1045,22 +1216,6 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
                         </>
                       )}
                     </button>
-
-                    {/* Quick instant test option for preview or restricted regions */}
-                    <div className="mt-3 p-2.5 bg-amber-50/90 border border-amber-200/90 rounded-xl flex items-center justify-between text-[11px] text-amber-900 gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>للتجربة السريعة أو إذا كانت خوادم SMS مقيدة في منطقتك:</span>
-                      </div>
-                      <button
-                        type="button"
-                        id="btn-quick-preview-phone"
-                        onClick={handleStartQuickDemoPhone}
-                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition-colors cursor-pointer text-[11px] shrink-0 whitespace-nowrap shadow-2xs"
-                      >
-                        دخول فوري برمز (123456)
-                      </button>
-                    </div>
                   </form>
 
                   <div className="mt-4 pt-3 border-t border-slate-100 text-center">
@@ -1117,22 +1272,6 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
                   </div>
 
                   <form onSubmit={handleVerifyPhoneOtp} className="space-y-4">
-                    {(confirmationResult as any)?.isSimulation && (
-                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>رمز المعاينة السريع هو: <strong className="font-mono font-bold text-sm text-emerald-800 dir-ltr">123456</strong></span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setOtpCode('123456')}
-                          className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] transition-colors cursor-pointer"
-                        >
-                          تعبئة الرمز
-                        </button>
-                      </div>
-                    )}
-
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 mb-1 text-center">
                         أدخل رمز التحقق (6 أرقام)

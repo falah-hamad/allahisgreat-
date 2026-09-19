@@ -85,8 +85,7 @@ interface AuthContextType {
   confirmNewPassword: (code: string, newPass: string) => Promise<void>;
   // Phone Authentication methods
   sendPhoneOtp: (phoneNumber: string, containerId?: string) => Promise<ConfirmationResult>;
-  verifyPhoneOtp: (confirmationResult: ConfirmationResult | any, code: string, displayName?: string) => Promise<User>;
-  loginWithPhoneSimulated: (phoneNumber: string, displayName?: string) => Promise<User>;
+  verifyPhoneOtp: (confirmationResult: ConfirmationResult, code: string, displayName?: string) => Promise<User>;
   logout: () => Promise<void>;
   authError: string | null;
   setAuthError: (err: string | null) => void;
@@ -118,12 +117,12 @@ function getArabicAuthErrorMessage(errorCode: string, rawMessage?: string): stri
     lowerMsg.includes('region enabled') ||
     lowerMsg.includes('sms region policy')
   ) {
-    return 'خدمة رسائل SMS لهذه الدولة مقيدة حالياً في إعدادات خوادم Firebase (SMS Region Policy). يمكنك تفعيل الدولة من لوحة تحكم Firebase Console، أو المتابعة الفورية برمز المعاينة التجريبي (123456).';
+    return 'خدمة رسائل SMS لهذه الدولة مقيدة في إعدادات خوادم Firebase (SMS Region Policy). يمكنك مراجعة وتفعيل الدولة من Firebase Console (Authentication > Settings > SMS Region Policy).';
   }
 
   switch (errorCode) {
     case 'auth/user-not-found':
-      return 'لا يوجد حساب مرتبط بهذا البريد الإلكتروني أو رقم الهاتف.';
+      return 'لا يوجد حساب مسجل بهذا البريد الإلكتروني في Firebase Authentication. يرجى التأكد من كتابة البريد الإلكتروني المسجل بشكل صحيح أو إنشاء حساب جديد.';
     case 'auth/wrong-password':
     case 'auth/invalid-credential':
       return 'البريد الإلكتروني أو كلمة المرور أو رمز التحقق غير صحيح.';
@@ -132,7 +131,7 @@ function getArabicAuthErrorMessage(errorCode: string, rawMessage?: string): stri
     case 'auth/weak-password':
       return 'كلمة المرور ضعيفة، يجب أن تتكون من 6 أحرف أو أرقام على الأقل.';
     case 'auth/invalid-email':
-      return 'صيغة البريد الإلكتروني غير صالحة.';
+      return 'صيغة البريد الإلكتروني غير صالحة. يرجى كتابة عنوان بريد صحيح (مثال: name@example.com).';
     case 'auth/invalid-phone-number':
       return 'رقم الهاتف غير صالح. يرجى التأكد من إدخال رقم صحيح بالصيغة الدولية (مثال: +9647XXXXXXXXX).';
     case 'auth/missing-phone-number':
@@ -144,11 +143,11 @@ function getArabicAuthErrorMessage(errorCode: string, rawMessage?: string): stri
     case 'auth/too-many-requests':
       return 'تم تجاوز الحد المسموح به من الطلبات مؤقتاً لحماية الحساب. يرجى الانتظار بضع دقائق ثم المحاولة مجدداً.';
     case 'auth/quota-exceeded':
-      return 'تم استهلاك الحصة اليومية المتاحة لرسائل SMS في Firebase. يرجى المحاولة لاحقاً أو مراجعة الحصة في Firebase Console.';
+      return 'تم استهلاك الحصة اليومية المتاحة في Firebase. يرجى المحاولة لاحقاً أو مراجعة الحصة في Firebase Console.';
     case 'auth/captcha-check-failed':
       return 'فشل فحص الأمان reCAPTCHA. يرجى التأكد من اتصالك بالإنترنت وتحديث الصفحة للمحاولة مجدداً.';
     case 'auth/network-request-failed':
-      return 'تعذر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.';
+      return 'تعذر الاتصال بخوادم Firebase. يرجى التحقق من اتصالك بالإنترنت.';
     case 'auth/billing-not-enabled':
       return 'خدمة الرسائل النصية القصيرة (SMS) تتطلب تفعيل خطة الحساب المناسبة في Firebase Console.';
     case 'auth/popup-closed-by-user':
@@ -157,13 +156,15 @@ function getArabicAuthErrorMessage(errorCode: string, rawMessage?: string): stri
       return 'تم إلغاء طلب تسجيل الدخول.';
     case 'auth/operation-not-allowed':
       if (lowerMsg.includes('sms') || lowerMsg.includes('phone')) {
-        return 'طريقة تسجيل الدخول برقم الهاتف أو خدمة SMS غير مفعلة لهذه المنطقة في Firebase Console (Authentication > Sign-in method > Phone أو Settings > SMS Region Policy). يمكنك تفعيلها أو استخدام رمز التجربة المباشر 123456.';
+        return 'طريقة تسجيل الدخول برقم الهاتف أو خدمة SMS غير مفعلة في Firebase Console (تأكد من تفعيل Phone في Authentication > Sign-in method، وتفعيل الدولة في Settings > SMS Region Policy).';
       }
-      return 'طريقة تسجيل الدخول هذه غير مفعلة حالياً في إعدادات Firebase Console (تأكد من تفعيل Phone أو Email في Authentication > Sign-in method).';
+      return 'طريقة تسجيل الدخول بالبريد وكلمة المرور (Email/Password) غير مفعلة في إعدادات Firebase Console. يرجى تفعيل موفر Email/Password من: Firebase Console > Authentication > Sign-in method.';
     case 'auth/popup-blocked':
       return 'تم حظر النافذة المنبثقة من قِبل المتصفح. يرجى السماح بالنوافذ المنبثقة أو فتح التطبيق في نافذة مستقلة جديدة.';
     case 'auth/requires-recent-login':
-      return 'لحماية أمان حسابك، تتطلب هذه العملية إعادة تسجيل الدخول حديثاً قبل المتابعة.';
+      return 'لحماية أمان حسابك، تتطلب هذه العملية إعادة تسجيل الدخول حديثاً (Recent Login) قبل المتابعة. يرجى تسجيل الخروج ثم تسجيل الدخول مجدداً.';
+    case 'auth/unauthorized-continue-uri':
+      return 'نطاق رابط المتابعة غير مدرج في النطاقات المصرح بها (Authorized Domains) في Firebase Console.';
     case 'auth/credential-already-in-use':
       return 'طريقة تسجيل الدخول هذه مرتبطة بالفعل بحساب مستخدم آخر.';
     case 'auth/no-such-provider':
@@ -173,7 +174,7 @@ function getArabicAuthErrorMessage(errorCode: string, rawMessage?: string): stri
     case 'auth/invalid-action-code':
       return 'رابط إعادة تعيين كلمة المرور غير صالح أو تم استخدامه مسبقاً.';
     default:
-      return 'حدث خطأ أثناء العملية، يرجى المحاولة مرة أخرى.';
+      return rawMessage || (errorCode ? `رمز الخطأ: ${errorCode}` : 'حدث خطأ أثناء العملية، يرجى المحاولة مرة أخرى.');
   }
 }
 
@@ -434,38 +435,57 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const resetPassword = async (email: string) => {
+  const resetPassword = async (email: string): Promise<void> => {
     setAuthError(null);
-    const cleanEmail = email.trim();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    if (!cleanEmail) {
+      const msg = 'يرجى إدخال البريد الإلكتروني.';
+      const err: any = new Error(msg);
+      err.code = 'auth/missing-email';
+      err.rawMessage = 'Missing email address.';
+      err.arabicExplanation = msg;
+      setAuthError(msg);
+      throw err;
+    }
+
     try {
-      // First attempt to pass actionCodeSettings so clicking the link returns to our app if allowed
+      // Send real password reset email via official Firebase Authentication
+      // We try with continue URL first (with handleCodeInApp: false so Firebase handles the web reset securely)
       try {
-        const currentUrl = window.location.origin + window.location.pathname;
+        const returnUrl = window.location.origin + window.location.pathname;
         await sendPasswordResetEmail(auth, cleanEmail, {
-          url: currentUrl,
-          handleCodeInApp: true,
+          url: returnUrl,
+          handleCodeInApp: false,
         });
-      } catch (innerErr: any) {
-        // If domain is not registered for continue url or error occurs, fallback to standard sendPasswordResetEmail
+      } catch (actionErr: any) {
+        // If continue URL fails for any domain authorization reasons, immediately fallback to standard reset email
         if (
-          innerErr?.code === 'auth/unauthorized-continue-uri' ||
-          innerErr?.code === 'auth/invalid-continue-uri' ||
-          innerErr?.code === 'auth/argument-error'
+          actionErr?.code === 'auth/unauthorized-continue-uri' ||
+          actionErr?.code === 'auth/invalid-continue-uri' ||
+          actionErr?.code === 'auth/missing-continue-uri' ||
+          actionErr?.code === 'auth/argument-error' ||
+          actionErr?.code === 'auth/internal-error'
         ) {
+          console.warn('sendPasswordResetEmail fallback to default Firebase action handler:', actionErr?.code);
           await sendPasswordResetEmail(auth, cleanEmail);
         } else {
-          throw innerErr;
+          throw actionErr;
         }
       }
     } catch (err: any) {
-      // In accordance with Requirement 2.5:
-      // Do not leak whether the email is registered to protect user privacy
-      if (err?.code === 'auth/user-not-found') {
-        return;
-      }
-      const msg = getArabicAuthErrorMessage(err?.code || '');
-      setAuthError(msg);
-      throw new Error(msg);
+      console.error('Firebase sendPasswordResetEmail error:', err);
+      const code = err?.code || 'auth/unknown-error';
+      const rawMessage = err?.message || String(err || '');
+      const arabicExplanation = getArabicAuthErrorMessage(code, rawMessage);
+
+      const customErr: any = new Error(
+        `[${code}] ${rawMessage}\n${arabicExplanation}`
+      );
+      customErr.code = code;
+      customErr.rawMessage = rawMessage;
+      customErr.arabicExplanation = arabicExplanation;
+      setAuthError(customErr.message);
+      throw customErr;
     }
   };
 
@@ -474,9 +494,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       return await verifyPasswordResetCode(auth, code);
     } catch (err: any) {
-      const msg = getArabicAuthErrorMessage(err?.code || '');
-      setAuthError(msg);
-      throw new Error(msg);
+      const codeErr = err?.code || 'auth/unknown-error';
+      const rawMessage = err?.message || String(err || '');
+      const explanation = getArabicAuthErrorMessage(codeErr, rawMessage);
+      const customErr: any = new Error(`[${codeErr}] ${explanation}`);
+      customErr.code = codeErr;
+      customErr.rawMessage = rawMessage;
+      customErr.arabicExplanation = explanation;
+      setAuthError(customErr.message);
+      throw customErr;
     }
   };
 
@@ -485,9 +511,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       await confirmPasswordReset(auth, code, newPass);
     } catch (err: any) {
-      const msg = getArabicAuthErrorMessage(err?.code || '');
-      setAuthError(msg);
-      throw new Error(msg);
+      const codeErr = err?.code || 'auth/unknown-error';
+      const rawMessage = err?.message || String(err || '');
+      const explanation = getArabicAuthErrorMessage(codeErr, rawMessage);
+      const customErr: any = new Error(`[${codeErr}] ${explanation}`);
+      customErr.code = codeErr;
+      customErr.rawMessage = rawMessage;
+      customErr.arabicExplanation = explanation;
+      setAuthError(customErr.message);
+      throw customErr;
     }
   };
 
@@ -521,9 +553,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         containerEl = document.createElement('div');
         containerEl.id = containerId;
         document.body.appendChild(containerEl);
+      } else {
+        containerEl.innerHTML = '';
       }
 
-      const verifier = new RecaptchaVerifier(auth, containerId, {
+      const verifier = new RecaptchaVerifier(auth, containerEl, {
         size: 'invisible',
         callback: () => {
           // reCAPTCHA solved - will proceed with signInWithPhoneNumber
@@ -535,6 +569,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       (window as any).phoneRecaptchaVerifier = verifier;
 
+      // Invoke real Firebase Phone Auth SMS sending
       const confirmationResult = await signInWithPhoneNumber(auth, trimmedPhone, verifier);
       return confirmationResult;
     } catch (err: any) {
@@ -545,80 +580,37 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         } catch (e) {}
         (window as any).phoneRecaptchaVerifier = null;
       }
-      const rawMsg = err?.message || '';
-      const msg = getArabicAuthErrorMessage(err?.code || '', rawMsg) || rawMsg || 'فشل إرسال رمز التحقق SMS.';
-      setAuthError(msg);
-      const customErr: any = new Error(msg);
-      customErr.code = err?.code;
+      const errorCode = err?.code || (err?.name && err?.name !== 'Error' ? err.name : 'auth/unknown-error');
+      const rawMsg = err?.message || err?.rawMessage || String(err || '');
+      const lowerRaw = rawMsg.toLowerCase();
+      const isRecaptcha = errorCode === 'auth/captcha-check-failed' || lowerRaw.includes('recaptcha') || lowerRaw.includes('g-recaptcha');
+      const arabicExplanation = getArabicAuthErrorMessage(errorCode, rawMsg);
+
+      const lines: string[] = [
+        `فشل إرسال رمز التحقق SMS عبر Firebase:`,
+        `كود الخطأ (Code): ${errorCode}`,
+        `رسالة Firebase: ${rawMsg}`
+      ];
+      if (isRecaptcha) {
+        lines.push(`تنبيه reCAPTCHA: حدثت مشكلة أثناء فحص الأمان reCAPTCHA.`);
+      }
+      if (arabicExplanation && arabicExplanation !== rawMsg && !arabicExplanation.includes('حدث خطأ أثناء العملية')) {
+        lines.push(`التوضيح: ${arabicExplanation}`);
+      }
+
+      const formattedError = lines.join('\n');
+      setAuthError(formattedError);
+      const customErr: any = new Error(formattedError);
+      customErr.code = errorCode;
       customErr.rawMessage = rawMsg;
+      customErr.isRecaptcha = isRecaptcha;
+      customErr.arabicExplanation = arabicExplanation;
       throw customErr;
     }
   };
 
-  // Login with simulated phone session when SMS region is restricted or in test mode
-  const loginWithPhoneSimulated = async (phoneNumber: string, displayName?: string): Promise<User> => {
-    setAuthError(null);
-    const cleanNumber = phoneNumber.trim();
-    const cleanName = displayName?.trim() || `التاجر (${cleanNumber})`;
-    const uid = 'phone_' + cleanNumber.replace(/\D/g, '');
-
-    const simulatedUser: any = {
-      uid,
-      phoneNumber: cleanNumber,
-      displayName: cleanName,
-      email: null,
-      emailVerified: true,
-      isAnonymous: false,
-      photoURL: null,
-      providerData: [
-        {
-          providerId: 'phone',
-          uid: cleanNumber,
-          displayName: cleanName,
-          email: null,
-          phoneNumber: cleanNumber,
-          photoURL: null,
-        }
-      ],
-      metadata: {
-        creationTime: new Date().toUTCString(),
-        lastSignInTime: new Date().toUTCString(),
-      },
-      reload: async () => {},
-      getIdToken: async () => 'simulated-phone-token',
-    };
-
-    const newProfile: UserExtendedProfile = {
-      displayName: cleanName,
-      phoneNumber: cleanNumber,
-      storeName: cleanName,
-      jobTitle: 'التاجر المعتمد',
-      photoURL: '',
-      bio: 'حساب موثق برقم الهاتف النقال',
-      twoFactorEnabled: true,
-      emailNotifications: false,
-      dueDebtAlerts: true,
-      paymentAlerts: true,
-      backupAlerts: true,
-      soundAlerts: true,
-      updatedAt: new Date().toISOString(),
-    };
-
-    setCurrentUser(simulatedUser);
-    setExtendedProfile(newProfile);
-    setIsGuest(false);
-
-    try {
-      localStorage.setItem('acc_user_profile', JSON.stringify(newProfile));
-      localStorage.setItem('acc_simulated_phone_user', JSON.stringify(simulatedUser));
-      localStorage.removeItem('acc_guest_mode');
-    } catch {}
-
-    return simulatedUser as User;
-  };
-
   // Verify Phone OTP Code with Firebase ConfirmationResult
-  const verifyPhoneOtp = async (confirmationResult: ConfirmationResult | any, code: string, displayName?: string): Promise<User> => {
+  const verifyPhoneOtp = async (confirmationResult: ConfirmationResult, code: string, displayName?: string): Promise<User> => {
     setAuthError(null);
     try {
       const cleanCode = code.trim();
@@ -626,12 +618,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         throw { code: 'auth/invalid-verification-code' };
       }
 
-      // If simulated phone session
-      if (confirmationResult?.isSimulation) {
-        const phone = confirmationResult.phoneNumber || '';
-        return await loginWithPhoneSimulated(phone, displayName);
-      }
-
+      // Real Firebase OTP verification via confirmationResult.confirm
       const userCredential = await confirmationResult.confirm(cleanCode);
       const user = userCredential.user;
 
@@ -686,9 +673,26 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return user;
     } catch (err: any) {
       console.error("Phone OTP verify error:", err);
-      const msg = getArabicAuthErrorMessage(err?.code || '') || err.message || 'فشل التحقق من رمز OTP.';
-      setAuthError(msg);
-      throw new Error(msg);
+      const errorCode = err?.code || 'auth/unknown-error';
+      const rawMsg = err?.message || String(err || '');
+      const arabicExplanation = getArabicAuthErrorMessage(errorCode, rawMsg);
+
+      const lines: string[] = [
+        `فشل التحقق من رمز التحقق (OTP):`,
+        `كود الخطأ (Code): ${errorCode}`,
+        `رسالة Firebase: ${rawMsg}`
+      ];
+      if (arabicExplanation && arabicExplanation !== rawMsg && !arabicExplanation.includes('حدث خطأ أثناء العملية')) {
+        lines.push(`التوضيح: ${arabicExplanation}`);
+      }
+
+      const formattedError = lines.join('\n');
+      setAuthError(formattedError);
+      const customErr: any = new Error(formattedError);
+      customErr.code = errorCode;
+      customErr.rawMessage = rawMsg;
+      customErr.arabicExplanation = arabicExplanation;
+      throw customErr;
     }
   };
 
@@ -756,50 +760,86 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Change password with verification of current password and Firebase rules
-  const changePassword = async (currentPass: string, newPass: string) => {
-    if (!auth.currentUser) throw new Error("المستخدم غير مسجل");
+  const changePassword = async (currentPass: string, newPass: string): Promise<void> => {
+    if (!auth.currentUser) {
+      const err: any = new Error("المستخدم غير مسجل الدخول حالياً.");
+      err.code = "auth/no-current-user";
+      throw err;
+    }
     setAuthError(null);
 
     const user = auth.currentUser;
     if (!user.email) {
-      throw new Error("لا يوجد بريد إلكتروني مرتبط بهذا الحساب.");
+      const err: any = new Error("لا يوجد بريد إلكتروني مسجل في هذا الحساب لتغيير كلمة المرور.");
+      err.code = "auth/no-email";
+      throw err;
     }
 
     if (!currentPass) {
-      const err = "يرجى إدخال كلمة المرور الحالية.";
-      setAuthError(err);
-      throw new Error(err);
+      const msg = "يرجى إدخال كلمة المرور الحالية.";
+      const err: any = new Error(msg);
+      err.code = "auth/missing-current-password";
+      err.rawMessage = "Current password is required.";
+      err.arabicExplanation = msg;
+      setAuthError(msg);
+      throw err;
     }
 
     if (!newPass || newPass.length < 6) {
-      const err = "كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف أو أرقام.";
-      setAuthError(err);
-      throw new Error(err);
+      const msg = "كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف أو أرقام.";
+      const err: any = new Error(msg);
+      err.code = "auth/weak-password";
+      err.rawMessage = "Password must be at least 6 characters.";
+      err.arabicExplanation = msg;
+      setAuthError(msg);
+      throw err;
     }
 
+    // 1. Verify current password by re-authenticating with Firebase Authentication
     try {
-      // 1. Verify current password by re-authenticating
       const credential = EmailAuthProvider.credential(user.email, currentPass);
       await reauthenticateWithCredential(user, credential);
     } catch (reauthErr: any) {
-      const code = reauthErr?.code || '';
+      console.error("Re-authentication error before password change:", reauthErr);
+      const code = reauthErr?.code || 'auth/unknown-error';
+      const rawMessage = reauthErr?.message || String(reauthErr || '');
+      
+      let explanation = getArabicAuthErrorMessage(code, rawMessage);
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        const msg = "كلمة المرور الحالية غير صحيحة، يرجى التأكد وإعادة المحاولة.";
-        setAuthError(msg);
-        throw new Error(msg);
+        explanation = "كلمة المرور الحالية غير صحيحة، يرجى التأكد من كتابة كلمة المرور الحالية بدقة وإعادة المحاولة.";
+      } else if (code === 'auth/requires-recent-login') {
+        explanation = "طلب Firebase Authentication إعادة تسجيل الدخول (Recent Login) لتأكيد هويتك قبل تغيير كلمة المرور. يرجى تسجيل الخروج ثم تسجيل الدخول مجدداً.";
       }
-      const msg = getArabicAuthErrorMessage(code);
-      setAuthError(msg);
-      throw new Error(msg);
+
+      const customErr: any = new Error(`فشل تأكيد كلمة المرور الحالية: [${code}] ${explanation}`);
+      customErr.code = code;
+      customErr.rawMessage = rawMessage;
+      customErr.arabicExplanation = explanation;
+      setAuthError(customErr.message);
+      throw customErr;
     }
 
+    // 2. Update to new password in Firebase Authentication
     try {
-      // 2. Update to new password
       await updatePassword(user, newPass);
     } catch (err: any) {
-      const msg = getArabicAuthErrorMessage(err?.code || '');
-      setAuthError(msg);
-      throw new Error(msg);
+      console.error("Firebase updatePassword error:", err);
+      const code = err?.code || 'auth/unknown-error';
+      const rawMessage = err?.message || String(err || '');
+      let explanation = getArabicAuthErrorMessage(code, rawMessage);
+      
+      if (code === 'auth/requires-recent-login') {
+        explanation = "طلب Firebase Authentication إعادة تسجيل الدخول (Recent Login) لدواعي الأمان قبل تغيير كلمة المرور. يرجى تسجيل الخروج ثم تسجيل الدخول مجدداً ثم تغيير كلمة المرور.";
+      } else if (code === 'auth/weak-password') {
+        explanation = "كلمة المرور الجديدة ضعيفة. يرجى اختيار كلمة مرور تتكون من 6 خانات أو أرقام على الأقل.";
+      }
+
+      const customErr: any = new Error(`فشل تحديث كلمة المرور: [${code}] ${explanation}`);
+      customErr.code = code;
+      customErr.rawMessage = rawMessage;
+      customErr.arabicExplanation = explanation;
+      setAuthError(customErr.message);
+      throw customErr;
     }
   };
 
@@ -998,7 +1038,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         confirmNewPassword,
         sendPhoneOtp,
         verifyPhoneOtp,
-        loginWithPhoneSimulated,
         logout,
         authError,
         setAuthError,

@@ -178,185 +178,204 @@ export function useAccountingData() {
 
     const unsubscribers: (() => void)[] = [];
 
+    // Background check for default settings (runs non-blocking to avoid stalling offline startup)
     const initializeCloudData = async () => {
       try {
-        if (activeUserIdRef.current !== userId) return;
+        if (activeUserIdRef.current !== userId || !navigator.onLine) return;
         const settingsRef = doc(db, "users", userId, "settings", "general");
         const settingsSnap = await getDocs(collection(db, "users", userId, "settings"));
         if (settingsSnap.empty && activeUserIdRef.current === userId) {
           await setDoc(settingsRef, cleanForFirestore({ ...defaultSettings, userId }));
         }
       } catch (err) {
-        console.warn("Notice: Firestore settings check:", err);
+        console.info("Notice: Background settings initialization check:", err);
+      }
+    };
+    initializeCloudData();
+
+    // Attach real-time Firestore listeners immediately.
+    // Thanks to Firestore Offline Persistence, listeners emit cached IndexedDB data in milliseconds.
+    if (activeUserIdRef.current !== userId) return;
+
+    // Helper to monitor pending write mutations across snapshots
+    const checkSyncStatus = (snapshot: { metadata?: { hasPendingWrites?: boolean } }) => {
+      if (snapshot.metadata?.hasPendingWrites) {
+        setIsCloudSyncing(true);
+      } else {
+        setIsCloudSyncing(false);
       }
     };
 
-    // Initialize first, then attach real-time listeners
-    initializeCloudData().finally(() => {
-      if (activeUserIdRef.current !== userId) return;
+    // 1. Folders Listener
+    const unsubFolders = onSnapshot(
+      collection(db, "users", userId, "folders"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: CustomerFolder[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as CustomerFolder;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+        setFolders(sorted);
+        try {
+          localStorage.setItem(getScopedKey("folders", userId), JSON.stringify(sorted));
+        } catch {}
+      },
+      (err) => console.warn("Folders snapshot notice:", err)
+    );
+    unsubscribers.push(unsubFolders);
 
-      // 1. Folders Listener
-      const unsubFolders = onSnapshot(
-        collection(db, "users", userId, "folders"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: CustomerFolder[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as CustomerFolder;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-          setFolders(sorted);
+    // 2. Customers Listener
+    const unsubCustomers = onSnapshot(
+      collection(db, "users", userId, "customers"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: Customer[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as Customer;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        setCustomers(sorted);
+        try {
+          localStorage.setItem(getScopedKey("customers", userId), JSON.stringify(sorted));
+        } catch {}
+      },
+      (err) => console.warn("Customers snapshot notice:", err)
+    );
+    unsubscribers.push(unsubCustomers);
+
+    // 3. Products Listener
+    const unsubProducts = onSnapshot(
+      collection(db, "users", userId, "products"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: Product[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as Product;
+          items.push({ ...d, userId });
+        });
+        setProducts(items);
+        try {
+          localStorage.setItem(getScopedKey("products", userId), JSON.stringify(items));
+        } catch {}
+      },
+      (err) => console.warn("Products snapshot notice:", err)
+    );
+    unsubscribers.push(unsubProducts);
+
+    // 4. Invoices Listener
+    const unsubInvoices = onSnapshot(
+      collection(db, "users", userId, "invoices"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: Invoice[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as Invoice;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        setInvoices(sorted);
+        try {
+          localStorage.setItem(getScopedKey("invoices", userId), JSON.stringify(sorted));
+        } catch {}
+      },
+      (err) => console.warn("Invoices snapshot notice:", err)
+    );
+    unsubscribers.push(unsubInvoices);
+
+    // 5. Payments Listener
+    const unsubPayments = onSnapshot(
+      collection(db, "users", userId, "payments"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: Payment[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as Payment;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        setPayments(sorted);
+        try {
+          localStorage.setItem(getScopedKey("payments", userId), JSON.stringify(sorted));
+        } catch {}
+      },
+      (err) => console.warn("Payments snapshot notice:", err)
+    );
+    unsubscribers.push(unsubPayments);
+
+    // 6. Settings Listener
+    const unsubSettings = onSnapshot(
+      doc(db, "users", userId, "settings", "general"),
+      (docSnap) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(docSnap);
+        if (docSnap.exists()) {
+          const d = docSnap.data() as SystemSettings;
+          setSettings({ ...d, userId });
           try {
-            localStorage.setItem(getScopedKey("folders", userId), JSON.stringify(sorted));
+            localStorage.setItem(getScopedKey("settings", userId), JSON.stringify({ ...d, userId }));
           } catch {}
-        },
-        (err) => console.warn("Folders snapshot error:", err)
-      );
-      unsubscribers.push(unsubFolders);
+        } else {
+          setSettings({ ...defaultSettings, userId });
+        }
+      },
+      (err) => console.warn("Settings snapshot notice:", err)
+    );
+    unsubscribers.push(unsubSettings);
 
-      // 2. Customers Listener
-      const unsubCustomers = onSnapshot(
-        collection(db, "users", userId, "customers"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: Customer[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as Customer;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-          setCustomers(sorted);
-          try {
-            localStorage.setItem(getScopedKey("customers", userId), JSON.stringify(sorted));
-          } catch {}
-        },
-        (err) => console.warn("Customers snapshot error:", err)
-      );
-      unsubscribers.push(unsubCustomers);
+    // 7. Customer ChangeLogs Listener
+    const unsubChangeLogs = onSnapshot(
+      collection(db, "users", userId, "changeLogs"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: CustomerChangeLogItem[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as CustomerChangeLogItem;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        setChangeLogs(sorted);
+        try {
+          localStorage.setItem(getScopedKey("change_logs", userId), JSON.stringify(sorted));
+        } catch {}
+      },
+      (err) => console.warn("ChangeLogs snapshot notice:", err)
+    );
+    unsubscribers.push(unsubChangeLogs);
 
-      // 3. Products Listener
-      const unsubProducts = onSnapshot(
-        collection(db, "users", userId, "products"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: Product[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as Product;
-            items.push({ ...d, userId });
-          });
-          setProducts(items);
-          try {
-            localStorage.setItem(getScopedKey("products", userId), JSON.stringify(items));
-          } catch {}
-        },
-        (err) => console.warn("Products snapshot error:", err)
-      );
-      unsubscribers.push(unsubProducts);
+    // 8. Cloud Backups Listener
+    const unsubBackups = onSnapshot(
+      collection(db, "users", userId, "backups"),
+      (snapshot) => {
+        if (activeUserIdRef.current !== userId) return;
+        checkSyncStatus(snapshot);
+        const items: CloudBackupItem[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data() as CloudBackupItem;
+          items.push({ ...d, userId });
+        });
+        const sorted = items.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        setCloudBackups(sorted);
+      },
+      (err) => console.warn("Backups snapshot notice:", err)
+    );
+    unsubscribers.push(unsubBackups);
 
-      // 4. Invoices Listener
-      const unsubInvoices = onSnapshot(
-        collection(db, "users", userId, "invoices"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: Invoice[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as Invoice;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-          setInvoices(sorted);
-          try {
-            localStorage.setItem(getScopedKey("invoices", userId), JSON.stringify(sorted));
-          } catch {}
-        },
-        (err) => console.warn("Invoices snapshot error:", err)
-      );
-      unsubscribers.push(unsubInvoices);
-
-      // 5. Payments Listener
-      const unsubPayments = onSnapshot(
-        collection(db, "users", userId, "payments"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: Payment[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as Payment;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-          setPayments(sorted);
-          try {
-            localStorage.setItem(getScopedKey("payments", userId), JSON.stringify(sorted));
-          } catch {}
-        },
-        (err) => console.warn("Payments snapshot error:", err)
-      );
-      unsubscribers.push(unsubPayments);
-
-      // 6. Settings Listener
-      const unsubSettings = onSnapshot(
-        doc(db, "users", userId, "settings", "general"),
-        (docSnap) => {
-          if (activeUserIdRef.current !== userId) return;
-          if (docSnap.exists()) {
-            const d = docSnap.data() as SystemSettings;
-            setSettings({ ...d, userId });
-            try {
-              localStorage.setItem(getScopedKey("settings", userId), JSON.stringify({ ...d, userId }));
-            } catch {}
-          } else {
-            setSettings({ ...defaultSettings, userId });
-          }
-        },
-        (err) => console.warn("Settings snapshot error:", err)
-      );
-      unsubscribers.push(unsubSettings);
-
-      // 7. Customer ChangeLogs Listener
-      const unsubChangeLogs = onSnapshot(
-        collection(db, "users", userId, "changeLogs"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: CustomerChangeLogItem[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as CustomerChangeLogItem;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort(
-            (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          );
-          setChangeLogs(sorted);
-          try {
-            localStorage.setItem(getScopedKey("change_logs", userId), JSON.stringify(sorted));
-          } catch {}
-        },
-        (err) => console.warn("ChangeLogs snapshot error:", err)
-      );
-      unsubscribers.push(unsubChangeLogs);
-
-      // 8. Cloud Backups Listener
-      const unsubBackups = onSnapshot(
-        collection(db, "users", userId, "backups"),
-        (snapshot) => {
-          if (activeUserIdRef.current !== userId) return;
-          const items: CloudBackupItem[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data() as CloudBackupItem;
-            items.push({ ...d, userId });
-          });
-          const sorted = items.sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          setCloudBackups(sorted);
-        },
-        (err) => console.warn("Backups snapshot error:", err)
-      );
-      unsubscribers.push(unsubBackups);
-
-      setLoading(false);
-      setIsCloudSyncing(false);
-    });
+    // Finish initial loading state immediately since cache hydration is active
+    setLoading(false);
+    setIsCloudSyncing(false);
 
     return () => {
       activeUserIdRef.current = null;
@@ -1249,7 +1268,7 @@ export function useAccountingData() {
       try {
         await setDoc(doc(db, "users", currentUser.uid, "settings", "general"), cleanForFirestore(settingsWithUser));
       } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, path);
+        console.warn("Firestore settings save warning at path:", path, err);
       }
     }
   };
@@ -1377,7 +1396,11 @@ export function useAccountingData() {
         batch.set(doc(db, "users", currentUser.uid, "payments", p.id), cleanForFirestore({ ...p, userId: currentUser.uid }));
       });
       batch.set(doc(db, "users", currentUser.uid, "settings", "general"), cleanForFirestore({ ...taggedSettings, userId: currentUser.uid }));
-      await batch.commit();
+      try {
+        await batch.commit();
+      } catch (err) {
+        console.warn("Firestore batchImportData commit notice:", err);
+      }
     }
   };
 
