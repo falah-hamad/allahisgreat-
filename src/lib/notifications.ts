@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { app, db, auth } from "./firebase";
 import { AppNotification, NotificationCategory } from "../types";
+import { linkFcmTokenToSession, getOrCreateCurrentSessionId } from "./sessionManager";
 
 let messagingInstance: Messaging | null = null;
 let messagingSupported: boolean | null = null;
@@ -149,6 +150,14 @@ export async function requestNotificationPermissionDetailed(userId?: string): Pr
         lastActiveAt: new Date().toISOString(),
         updatedAt: serverTimestamp(),
       }, { merge: true });
+
+      // Link FCM token to the current device session in Firestore
+      try {
+        const currentSessionId = getOrCreateCurrentSessionId();
+        await linkFcmTokenToSession(targetUid, currentSessionId, currentToken);
+      } catch (sessErr) {
+        console.warn("Could not link token to session:", sessErr);
+      }
     }
 
     return {

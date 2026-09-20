@@ -167,6 +167,24 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["id", "userId", "token", "platform", "updatedAt"]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "Active and past login sessions per device for user account",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "deviceName": { "type": "string" },
+        "deviceType": { "type": "string" },
+        "platform": { "type": "string" },
+        "browser": { "type": "string" },
+        "loginAt": { "type": "string" },
+        "lastActivityAt": { "type": "string" },
+        "status": { "type": "string" },
+        "fcmToken": { "type": "string" }
+      },
+      "required": ["sessionId", "userId", "deviceName", "platform", "status"]
     }
   },
   "firestore": {
@@ -209,6 +227,10 @@
     "/users/{userId}/tokens/{tokenId}": {
       "schema": { "$ref": "#/entities/DeviceToken" },
       "description": "FCM cloud messaging registration tokens"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/UserSession" },
+      "description": "Active and terminated device sessions for multi-device tracking"
     }
   }
 }

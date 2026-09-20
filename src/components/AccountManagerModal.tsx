@@ -92,6 +92,7 @@ export default function AccountManagerModal({
     sendEmailVerificationLink,
     linkSocialAccount,
     unlinkSocialAccount,
+    logoutSession,
     logoutOtherSessions,
     deleteUserAccount,
     resetPassword,
@@ -153,6 +154,9 @@ export default function AccountManagerModal({
 
   // Sync state
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+
+  // Sessions termination loading state
+  const [terminatingSessionId, setTerminatingSessionId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -373,6 +377,18 @@ export default function AccountManagerModal({
       showToast("تعذر إنهاء الجلسات الأخرى", "error");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleLogoutSingleSession = async (sessionId: string) => {
+    setTerminatingSessionId(sessionId);
+    try {
+      await logoutSession(sessionId);
+      showToast("تم تسجيل الخروج من هذا الجهاز بنجاح!");
+    } catch (err: any) {
+      showToast("تعذر تسجيل الخروج من الجهاز المحدد", "error");
+    } finally {
+      setTerminatingSessionId(null);
     }
   };
 
@@ -1731,43 +1747,96 @@ export default function AccountManagerModal({
                 </div>
 
                 <div className="space-y-3">
-                  {sessionsList.map((session) => (
-                    <div
-                      key={session.id}
-                      className={`p-4 rounded-xl border flex items-center justify-between transition-all ${
-                        session.isCurrent
-                          ? "border-emerald-300 bg-emerald-50/40"
-                          : "border-slate-200 bg-white"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                            session.isCurrent ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
-                          }`}
-                        >
-                          {session.os.includes("Android") || session.os.includes("iOS") ? (
-                            <Smartphone className="w-5 h-5" />
-                          ) : (
-                            <Laptop className="w-5 h-5" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold text-slate-800">{session.deviceName}</p>
-                            {session.isCurrent && (
-                              <span className="text-[9px] font-bold bg-emerald-600 text-white px-2 py-0.2 rounded-full">
-                                هذا الجهاز (نشط حالياً)
-                              </span>
+                  {sessionsList.map((session) => {
+                    const isOnline = session.status !== "ended" && (() => {
+                      const time = session.lastActivityAt || session.lastActive;
+                      if (!time) return false;
+                      const diff = Date.now() - new Date(time).getTime();
+                      return diff < 5 * 60 * 1000;
+                    })();
+
+                    const isEnded = session.status === "ended";
+                    const lastActiveDate = new Date(session.lastActivityAt || session.lastActive);
+                    const formattedTime = !isNaN(lastActiveDate.getTime())
+                      ? `${lastActiveDate.toLocaleDateString("ar-SA", { month: "numeric", day: "numeric" })} ${lastActiveDate.toLocaleTimeString("ar-SA", { hour: "2-digit", minute: "2-digit" })}`
+                      : "الآن";
+
+                    return (
+                      <div
+                        key={session.id}
+                        className={`p-4 rounded-xl border flex items-center justify-between transition-all ${
+                          session.isCurrent
+                            ? "border-emerald-300 bg-emerald-50/40"
+                            : isEnded
+                            ? "border-slate-200 bg-slate-50/70 opacity-70"
+                            : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                              session.isCurrent
+                                ? "bg-emerald-100 text-emerald-700"
+                                : isEnded
+                                ? "bg-slate-100 text-slate-400"
+                                : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {session.os.includes("Android") || session.os.includes("iOS") || session.deviceType === "mobile" ? (
+                              <Smartphone className="w-5 h-5" />
+                            ) : (
+                              <Laptop className="w-5 h-5" />
                             )}
                           </div>
-                          <p className="text-[10px] text-slate-400 mt-0.5">
-                            المتصفح: {session.browser} • آخر نشاط: {new Date(session.lastActive).toLocaleTimeString("ar-SA")}
-                          </p>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-xs font-bold text-slate-800">{session.deviceName}</p>
+                              {session.isCurrent && (
+                                <span className="text-[9px] font-bold bg-emerald-600 text-white px-2 py-0.2 rounded-full">
+                                  هذا الجهاز (نشط حالياً)
+                                </span>
+                              )}
+                              {isEnded ? (
+                                <span className="text-[9px] font-bold bg-slate-200 text-slate-600 px-2 py-0.2 rounded-full">
+                                  تم إنهاء الجلسة
+                                </span>
+                              ) : isOnline ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.2 rounded-full">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                  متصل الآن
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              المتصفح: {session.browser} • المنصة: {session.platform || session.os} • آخر نشاط: {formattedTime}
+                            </p>
+                          </div>
                         </div>
+
+                        {/* Action: Logout single device */}
+                        {!session.isCurrent && !isEnded && (
+                          <button
+                            onClick={() => handleLogoutSingleSession(session.id)}
+                            disabled={saving || terminatingSessionId === session.id}
+                            className="px-3 py-1.5 border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-bold rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1.5"
+                            title="تسجيل الخروج من هذا الجهاز"
+                          >
+                            {terminatingSessionId === session.id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <LogOut className="w-3.5 h-3.5" />
+                            )}
+                            <span>تسجيل الخروج</span>
+                          </button>
+                        )}
+                        {isEnded && (
+                          <span className="text-[11px] text-slate-400 font-medium shrink-0">
+                            منتهية
+                          </span>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">

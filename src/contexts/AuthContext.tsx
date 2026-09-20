@@ -38,6 +38,17 @@ import {
   facebookProvider,
   microsoftProvider,
 } from '../lib/firebase';
+import {
+  getOrCreateCurrentSessionId,
+  resetCurrentSessionId,
+  initializeOrUpdateCurrentSession,
+  subscribeToUserSessions,
+  subscribeToCurrentSessionStatus,
+  touchSessionActivity,
+  terminateSession,
+  terminateAllOtherSessions,
+  UserSessionDoc,
+} from '../lib/sessionManager';
 
 export type { ConfirmationResult };
 
@@ -59,12 +70,21 @@ export interface UserExtendedProfile {
 
 export interface UserSessionInfo {
   id: string;
+  sessionId?: string;
+  userId?: string;
   deviceName: string;
+  deviceType?: "mobile" | "tablet" | "desktop";
+  platform?: string;
   browser: string;
   os: string;
   ip?: string;
+  loginAt?: string;
+  lastActivityAt?: string;
   lastActive: string;
+  status?: "active" | "ended";
+  fcmToken?: string | null;
   isCurrent: boolean;
+  endedAt?: string;
 }
 
 interface AuthContextType {
@@ -95,6 +115,7 @@ interface AuthContextType {
   sendEmailVerificationLink: () => Promise<void>;
   linkSocialAccount: (provider: 'google' | 'facebook' | 'microsoft') => Promise<void>;
   unlinkSocialAccount: (providerId: string) => Promise<void>;
+  logoutSession: (sessionId: string) => Promise<void>;
   logoutOtherSessions: () => Promise<void>;
   deleteUserAccount: (confirmText: string, currentPassword?: string) => Promise<void>;
   reloadUser: () => Promise<void>;
@@ -236,7 +257,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Initialize and load user profile from Firestore
   useEffect(() => {
+    let unsubSessions: (() => void) | null = null;
+    let unsubStatus: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (unsubSessions) {
+        unsubSessions();
+        unsubSessions = null;
+      }
+      if (unsubStatus) {
+        unsubStatus();
+        unsubStatus = null;
+      }
+
       setCurrentUser(user);
       if (user) {
         // Load extended profile from Firestore
@@ -277,48 +310,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.warn("Could not read profile from Firestore:", e);
         }
 
-        // Register current device session
-        try {
-          const { browser, os } = detectDeviceInfo();
-          const currentSessionId = 'current-session';
-          const sessionData: UserSessionInfo = {
-            id: currentSessionId,
-            deviceName: `${os} - ${browser}`,
-            browser,
-            os,
-            lastActive: new Date().toISOString(),
-            isCurrent: true,
-          };
+        // Register or sync current device session
+        const currentSessionId = getOrCreateCurrentSessionId();
+        initializeOrUpdateCurrentSession(user.uid).catch((err) => {
+          console.warn("Could not register session in Firestore:", err);
+        });
 
-          const sessionDocRef = doc(db, 'users', user.uid, 'sessions', currentSessionId);
-          setDoc(sessionDocRef, sessionData).catch(console.error);
-
-          // Get sessions
-          const sessionsCol = collection(db, 'users', user.uid, 'sessions');
-          const snaps = await getDocs(sessionsCol);
-          const list: UserSessionInfo[] = [];
-          snaps.forEach((s) => {
-            const val = s.data() as UserSessionInfo;
-            list.push({ ...val, isCurrent: s.id === currentSessionId });
-          });
-          if (list.length === 0) {
-            list.push(sessionData);
-          }
+        // Real-time synchronization of all user sessions
+        unsubSessions = subscribeToUserSessions(user.uid, currentSessionId, (list) => {
           setSessionsList(list);
-        } catch (err) {
-          // Fallback device session
-          const { browser, os } = detectDeviceInfo();
-          setSessionsList([
-            {
-              id: 'current-session',
-              deviceName: `${os} - ${browser}`,
-              browser,
-              os,
-              lastActive: new Date().toISOString(),
-              isCurrent: true,
-            }
-          ]);
-        }
+        });
+
+        // Listen for remote termination from another device
+        unsubStatus = subscribeToCurrentSessionStatus(user.uid, currentSessionId, async () => {
+          if (unsubSessions) {
+            unsubSessions();
+            unsubSessions = null;
+          }
+          if (unsubStatus) {
+            unsubStatus();
+            unsubStatus = null;
+          }
+          try {
+            await firebaseSignOut(auth);
+          } catch {}
+          resetCurrentSessionId();
+          setCurrentUser(null);
+          alert("تم تسجيل الخروج من هذه الجلسة بناءً على طلبك من جهاز آخر.");
+        });
       } else {
         setSessionsList([]);
         try {
@@ -337,8 +356,39 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubSessions) unsubSessions();
+      if (unsubStatus) unsubStatus();
+    };
   }, []);
+
+  // Throttled update of lastActivityAt on user interactions (no spam on re-renders)
+  useEffect(() => {
+    if (!currentUser) return;
+    const currentSessionId = getOrCreateCurrentSessionId();
+
+    const onUserActivity = () => {
+      touchSessionActivity(currentUser.uid, currentSessionId);
+    };
+
+    window.addEventListener("focus", onUserActivity, { passive: true });
+    window.addEventListener("click", onUserActivity, { passive: true });
+    window.addEventListener("keydown", onUserActivity, { passive: true });
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        onUserActivity();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", onUserActivity);
+      window.removeEventListener("click", onUserActivity);
+      window.removeEventListener("keydown", onUserActivity);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [currentUser?.uid]);
 
   const loginWithEmail = async (email: string, pass: string) => {
     setAuthError(null);
@@ -698,11 +748,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logout = async () => {
     setAuthError(null);
+    if (auth.currentUser) {
+      try {
+        const currentSessionId = getOrCreateCurrentSessionId();
+        await terminateSession(auth.currentUser.uid, currentSessionId);
+      } catch (e) {
+        console.warn("Could not mark session ended on logout:", e);
+      }
+    }
     try {
       await firebaseSignOut(auth);
     } catch (err: any) {
       console.error('Logout error:', err);
     }
+    resetCurrentSessionId();
     // Clean local storage cache on logout
     localStorage.removeItem('acc_user_profile');
     localStorage.removeItem('acc_guest_mode');
@@ -898,22 +957,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Logout a specific session
+  const logoutSession = async (targetSessionId: string) => {
+    if (!auth.currentUser) return;
+    const currentSessionId = getOrCreateCurrentSessionId();
+    if (targetSessionId === currentSessionId) {
+      await logout();
+      return;
+    }
+    await terminateSession(auth.currentUser.uid, targetSessionId);
+  };
+
   // Logout other sessions
   const logoutOtherSessions = async () => {
     if (!auth.currentUser) return;
-    try {
-      const sessionsCol = collection(db, 'users', auth.currentUser.uid, 'sessions');
-      const snaps = await getDocs(sessionsCol);
-      for (const s of snaps.docs) {
-        if (s.id !== 'current-session') {
-          await deleteDoc(s.ref);
-        }
-      }
-      setSessionsList((prev) => prev.filter((s) => s.isCurrent));
-    } catch (e) {
-      console.warn("Could not delete other sessions:", e);
-      setSessionsList((prev) => prev.filter((s) => s.isCurrent));
-    }
+    const currentSessionId = getOrCreateCurrentSessionId();
+    await terminateAllOtherSessions(auth.currentUser.uid, currentSessionId);
   };
 
   // Delete User Account Completely
@@ -1046,6 +1105,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         sendEmailVerificationLink,
         linkSocialAccount,
         unlinkSocialAccount,
+        logoutSession,
         logoutOtherSessions,
         deleteUserAccount,
         reloadUser,
