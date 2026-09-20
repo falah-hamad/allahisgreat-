@@ -228,6 +228,9 @@ export default function VerticalLedgerSheet({
     return null;
   });
 
+  // Local draft text for amounts currently being typed by the user to avoid cursor jumping or value replacement
+  const [editingAmounts, setEditingAmounts] = useState<Record<string, string>>({});
+
   // Save feedback state
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
@@ -509,6 +512,12 @@ export default function VerticalLedgerSheet({
     const targetId = idToClear || selectedRowId;
     if (!targetId) return;
 
+    setEditingAmounts((prev) => {
+      const next = { ...prev };
+      delete next[targetId];
+      return next;
+    });
+
     const itemToClear = items.find((it) => it.id === targetId && !it.isSeparator);
     const oldAmt = Number(itemToClear?.total || itemToClear?.unitPrice || 0);
 
@@ -705,7 +714,15 @@ export default function VerticalLedgerSheet({
 
   // 9. Update row amount (inline editing)
   const handleUpdateAmount = (id: string, amountStr: string) => {
-    const cleanNum = Number(amountStr.replace(/[^\d.]/g, "")) || 0;
+    // Keep exact user draft text so cursor, typing, backspace, and deletion work smoothly
+    setEditingAmounts((prev) => ({ ...prev, [id]: amountStr }));
+
+    // Extract clean number: support Arabic/Persian digits and decimals
+    const normalizedStr = amountStr
+      .replace(/[٠-٩]/g, (d) => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)])
+      .replace(/[^\d.]/g, "");
+    const cleanNum = normalizedStr === "" ? 0 : Number(normalizedStr) || 0;
+
     const updated = items.map((it) => {
       if (it.id === id) {
         return {
@@ -719,9 +736,25 @@ export default function VerticalLedgerSheet({
     persistChanges(updated);
   };
 
+  // Blur handler for row amount: clear draft so formatted display or clean value shows
+  const handleRowAmountBlur = (id: string) => {
+    setEditingAmounts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
   // 10. Update paid amount for separator (updates UI state immediately, debounces commit notification)
   const handleUpdatePaidAmount = (sepId: string, paidValStr: string) => {
-    const rawVal = Number(paidValStr.replace(/[^\d.]/g, "")) || 0;
+    // Keep exact draft text for separator paid amount
+    setEditingAmounts((prev) => ({ ...prev, [sepId]: paidValStr }));
+
+    const normalizedStr = paidValStr
+      .replace(/[٠-٩]/g, (d) => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)])
+      .replace(/[^\d.]/g, "");
+    const rawVal = normalizedStr === "" ? 0 : Number(normalizedStr) || 0;
+
     const todayStr = getCurrentDateFormatted();
     const timeStr = getCurrentTimeFormatted();
     const dayStr = getArabicDayName(todayStr);
@@ -751,6 +784,16 @@ export default function VerticalLedgerSheet({
         handleCommitSeparatorPaidLog(sepId);
       }, 1500);
     }
+  };
+
+  // Blur handler for separator paid amount
+  const handleSeparatorPaidBlur = (sepId: string) => {
+    setEditingAmounts((prev) => {
+      const next = { ...prev };
+      delete next[sepId];
+      return next;
+    });
+    handleCommitSeparatorPaidLog(sepId);
   };
 
   // 11. Clear all items from this ledger sheet
@@ -1159,10 +1202,10 @@ export default function VerticalLedgerSheet({
                               inputMode="numeric"
                               style={{ fontSize: `${fontSize}px` }}
                               value={
-                                item.total !== undefined
-                                  ? item.total === 0
-                                    ? ""
-                                    : Number(item.total).toLocaleString()
+                                editingAmounts[item.id] !== undefined
+                                  ? editingAmounts[item.id]
+                                  : item.total !== undefined && item.total !== 0
+                                  ? String(item.total)
                                   : ""
                               }
                               placeholder="0"
@@ -1171,8 +1214,10 @@ export default function VerticalLedgerSheet({
                                 setSelectedRowId(item.id);
                               }}
                               onChange={(e) => handleUpdateAmount(item.id, e.target.value)}
+                              onBlur={() => handleRowAmountBlur(item.id)}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
+                                  handleRowAmountBlur(item.id);
                                   handleCommitRowDebtLog(item.id);
                                 }
                               }}
@@ -1304,17 +1349,23 @@ export default function VerticalLedgerSheet({
                               type="text"
                               inputMode="numeric"
                               style={{ fontSize: `${fontSize + 1}px` }}
-                              value={sec.paid ? Number(sec.paid).toLocaleString() : ""}
+                              value={
+                                editingAmounts[sec.separator!.id] !== undefined
+                                  ? editingAmounts[sec.separator!.id]
+                                  : sec.paid
+                                  ? String(sec.paid)
+                                  : ""
+                              }
                               placeholder="0"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedRowId(sec.separator!.id);
                               }}
                               onChange={(e) => handleUpdatePaidAmount(sec.separator!.id, e.target.value)}
-                              onBlur={() => handleCommitSeparatorPaidLog(sec.separator!.id)}
+                              onBlur={() => handleSeparatorPaidBlur(sec.separator!.id)}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
-                                  handleCommitSeparatorPaidLog(sec.separator!.id);
+                                  handleSeparatorPaidBlur(sec.separator!.id);
                                 }
                               }}
                               className="w-28 text-center font-mono font-bold text-emerald-800 bg-white/95 border border-slate-300/90 rounded px-2 py-0.5 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 shadow-2xs"

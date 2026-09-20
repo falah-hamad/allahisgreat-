@@ -25,7 +25,6 @@ import {
   disableNetwork,
   waitForPendingWrites,
   doc, 
-  getDocFromServer,
   collection,
   onSnapshot,
   setDoc,
@@ -185,31 +184,3 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-// Test initial connection as required by skill guidelines
-export async function testFirestoreConnection() {
-  if (typeof window === 'undefined') return;
-  // Delay slightly to give the browser network stack and Firestore channel time to establish
-  setTimeout(async () => {
-    try {
-      if (navigator.onLine) {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      }
-    } catch (error: any) {
-      const msg = error?.message || String(error);
-      const code = error?.code || '';
-      if (
-        code === 'unavailable' ||
-        msg.includes('offline') ||
-        msg.includes('Could not reach Cloud Firestore') ||
-        msg.includes('10 seconds') ||
-        msg.includes('Backend didn\'t respond')
-      ) {
-        console.info('Firestore is operating in offline mode / local cache until connection stabilizes.');
-      } else {
-        console.warn('Firebase initial connection check notice:', error);
-      }
-    }
-  }, 2000);
-}
-testFirestoreConnection();

@@ -371,14 +371,21 @@ export function subscribeToCurrentSessionStatus(
   onEnded: () => void
 ): Unsubscribe {
   const sessionDocRef = doc(db, "users", userId, "sessions", currentSessionId);
-  return onSnapshot(sessionDocRef, (snap) => {
-    if (snap.exists()) {
-      const data = snap.data() as Partial<UserSessionDoc>;
-      if (data.status === "ended") {
-        onEnded();
+  return onSnapshot(
+    sessionDocRef,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data() as Partial<UserSessionDoc>;
+        if (data.status === "ended") {
+          onEnded();
+        }
       }
+    },
+    (err) => {
+      // Gracefully ignore offline/connection glitches for session termination watcher
+      console.warn("Session status subscription notice:", err?.message || err);
     }
-  });
+  );
 }
 
 /**
