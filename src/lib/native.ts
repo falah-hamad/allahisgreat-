@@ -1,10 +1,10 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
-import { PushNotifications, type PluginListenerHandle, type Token } from '@capacitor/push-notifications';
+import { PushNotifications, type Token } from '@capacitor/push-notifications';
 import { FilePicker } from '@capawesome/capacitor-file-picker';
-import { BiometricAuth } from '@capawesome/capacitor-biometrics';
+import { BiometricAuth } from '@aparajita/capacitor-biometric-auth';
 
 export const isNativeAndroid = () =>
   Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
@@ -27,8 +27,14 @@ export async function pickNativeFiles() {
 
 export async function authenticateWithBiometrics(reason = 'تأكيد هويتك للوصول إلى التطبيق') {
   if (!isNativeAndroid()) return { success: false, unsupported: true };
-  const result = await BiometricAuth.authenticate({ reason });
-  return { success: result.verified, unsupported: false };
+  try {
+    const check = await BiometricAuth.checkBiometry();
+    if (!check.isAvailable) return { success: false, unsupported: true };
+    await BiometricAuth.authenticate({ reason });
+    return { success: true, unsupported: false };
+  } catch {
+    return { success: false, unsupported: false };
+  }
 }
 
 export const setNativePreference = (key: string, value: string) => Preferences.set({ key, value });

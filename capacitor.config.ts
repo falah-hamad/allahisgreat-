@@ -4,7 +4,6 @@ const config: CapacitorConfig = {
   appId: 'com.falahhamad.deftaraldeyon',
   appName: 'دفتر الديون المحاسبي',
   webDir: 'dist',
-  bundledWebRuntime: false,
   server: {
     androidScheme: 'https',
   },
