@@ -32,6 +32,12 @@ import {
 import { SystemSettings, CloudBackupItem } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import { uploadUserFile, deleteUserFileByUrl } from "../lib/firebase";
+import {
+  isNativeAndroid,
+  pickNativeImageFile,
+  pickNativeJsonFile,
+  saveNativeJsonFile,
+} from "../lib/native";
 
 interface SettingsViewProps {
   settings: SystemSettings;
@@ -91,8 +97,7 @@ export default function SettingsView({
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleLogoFile = async (file?: File | null) => {
     if (!file || !currentUser) return;
     if (!file.type.startsWith("image/")) {
       showMsg("error", "يرجى اختيار ملف صورة صالح (PNG, JPG, WebP)");
@@ -112,6 +117,20 @@ export default function SettingsView({
     } finally {
       setLogoUploading(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await handleLogoFile(e.target.files?.[0]);
+  };
+
+  const handleNativeLogoPick = async (source: "gallery" | "camera") => {
+    try {
+      const file = await pickNativeImageFile(source);
+      if (!file) return;
+      await handleLogoFile(file);
+    } catch (err) {
+      showMsg("error", source === "camera" ? "تعذر التقاط الشعار من الكاميرا." : "تعذر اختيار الشعار من هاتفك.");
     }
   };
 
@@ -182,7 +201,7 @@ export default function SettingsView({
   const [isExporting, setIsExporting] = useState(false);
 
   // Export database to JSON with structured metadata & download trigger
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
       setIsExporting(true);
       const timestamp = new Date().toISOString();
@@ -212,11 +231,19 @@ export default function SettingsView({
       };
 
       const jsonStr = JSON.stringify(backupData, null, 2);
+      const fileName = `نسخة_احتياطية_قاعدة_البيانات_${dateStr}_${timeStr}.json`;
+
+      if (isNativeAndroid()) {
+        const savedPath = await saveNativeJsonFile(fileName, jsonStr);
+        showMsg("success", `تم حفظ النسخة الاحتياطية داخل ${savedPath || "مجلد المستندات"} بنجاح.`);
+        return;
+      }
+
       const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
       const url = URL.createObjectURL(blob);
       const downloadAnchor = document.createElement("a");
       downloadAnchor.href = url;
-      downloadAnchor.download = `نسخة_احتياطية_قاعدة_البيانات_${dateStr}_${timeStr}.json`;
+      downloadAnchor.download = fileName;
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
@@ -232,9 +259,56 @@ export default function SettingsView({
 
   // Import database from JSON with safe file inspection
   const handleImportClick = () => {
+    if (isNativeAndroid()) {
+      handleNativeImport();
+      return;
+    }
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
       fileInputRef.current.click();
+    }
+  };
+
+  const handleNativeImport = async () => {
+    try {
+      const picked = await pickNativeJsonFile();
+      if (!picked) return;
+      handleBackupContent(picked.content, picked.name);
+    } catch (err) {
+      showMsg("error", "تعذر قراءة النسخة الاحتياطية من هاتفك.");
+    }
+  };
+
+  const handleBackupContent = (rawContent: string, fileName: string) => {
+    try {
+      const parsed = JSON.parse(rawContent);
+      const payload = parsed.data || parsed;
+
+      if (
+        !payload ||
+        !Array.isArray(payload.customers) ||
+        !Array.isArray(payload.products) ||
+        !Array.isArray(payload.invoices) ||
+        !Array.isArray(payload.payments)
+      ) {
+        showMsg("error", "الملف المختار ليس نسخة احتياطية صالحة متوافقة مع قاعدة بيانات النظام.");
+        return;
+      }
+
+      setPendingBackup({
+        file: new File([rawContent], fileName, { type: "application/json" }),
+        parsed,
+        stats: {
+          customersCount: payload.customers.length,
+          productsCount: payload.products.length,
+          invoicesCount: payload.invoices.length,
+          paymentsCount: payload.payments.length,
+          exportDate: parsed.meta?.exportDate || payload.exportDate || undefined,
+          appName: parsed.meta?.appName || "نسخة احتياطية محلية",
+        },
+      });
+    } catch (err: any) {
+      showMsg("error", "فشل قراءة الملف؛ الملف ليس بصيغة JSON صحيحة أو تالف.");
     }
   };
 
@@ -244,38 +318,7 @@ export default function SettingsView({
 
     const reader = new FileReader();
     reader.onload = (event) => {
-      try {
-        const rawContent = event.target?.result as string;
-        const parsed = JSON.parse(rawContent);
-        const payload = parsed.data || parsed;
-
-        if (
-          !payload ||
-          !Array.isArray(payload.customers) ||
-          !Array.isArray(payload.products) ||
-          !Array.isArray(payload.invoices) ||
-          !Array.isArray(payload.payments)
-        ) {
-          showMsg("error", "الملف المختار ليس نسخة احتياطية صالحة متوافقة مع قاعدة بيانات النظام.");
-          return;
-        }
-
-        // Open confirmation preview modal
-        setPendingBackup({
-          file,
-          parsed,
-          stats: {
-            customersCount: payload.customers.length,
-            productsCount: payload.products.length,
-            invoicesCount: payload.invoices.length,
-            paymentsCount: payload.payments.length,
-            exportDate: parsed.meta?.exportDate || payload.exportDate || undefined,
-            appName: parsed.meta?.appName || "نسخة احتياطية محلية",
-          },
-        });
-      } catch (err: any) {
-        showMsg("error", "فشل قراءة الملف؛ الملف ليس بصيغة JSON صحيحة أو تالف.");
-      }
+      handleBackupContent(event.target?.result as string, file.name);
     };
     reader.readAsText(file);
   };
@@ -434,7 +477,7 @@ export default function SettingsView({
               <button
                 type="button"
                 disabled={logoUploading}
-                onClick={() => logoInputRef.current?.click()}
+                onClick={() => (isNativeAndroid() ? handleNativeLogoPick("gallery") : logoInputRef.current?.click())}
                 className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
               >
                 {logoUploading ? (
@@ -444,6 +487,17 @@ export default function SettingsView({
                 )}
                 {settings.logoUrl ? "تغيير الشعار" : "رفع شعار جديد"}
               </button>
+              {isNativeAndroid() && (
+                <button
+                  type="button"
+                  disabled={logoUploading}
+                  onClick={() => handleNativeLogoPick("camera")}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-2xs disabled:opacity-50"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+                  التقاط
+                </button>
+              )}
               {settings.logoUrl && (
                 <button
                   type="button"
