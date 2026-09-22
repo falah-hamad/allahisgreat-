@@ -609,6 +609,7 @@ export default function App() {
               invoices={activeInvoices}
               payments={activePayments}
               settings={settings}
+              folders={folders}
             />
           )}
 

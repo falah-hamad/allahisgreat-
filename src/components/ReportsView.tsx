@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import {
   TrendingUp,
   Printer,
@@ -8,9 +8,13 @@ import {
   Users,
   Building,
   BarChart,
-  ClipboardList
+  ClipboardList,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  ChevronDown
 } from "lucide-react";
-import { Customer, Product, Invoice, Payment, SystemSettings } from "../types";
+import { Customer, CustomerFolder, Product, Invoice, Payment, SystemSettings } from "../types";
 
 interface ReportsViewProps {
   customers: Customer[];
@@ -18,6 +22,15 @@ interface ReportsViewProps {
   invoices: Invoice[];
   payments: Payment[];
   settings: SystemSettings;
+  folders?: CustomerFolder[];
+}
+
+interface FolderOption {
+  id: string;
+  name: string;
+  depth: number;
+  prefix: string;
+  isSubfolder: boolean;
 }
 
 export default function ReportsView({
@@ -26,75 +39,238 @@ export default function ReportsView({
   invoices,
   payments,
   settings,
+  folders = [],
 }: ReportsViewProps) {
   const [reportType, setReportType] = useState<"debts" | "collections" | "inventory">("debts");
+
+  // Filter by folder: "all" or folderId
+  const [selectedFolderId, setSelectedFolderId] = useState<string>("all");
 
   // Filters state
   const [startDate, setStartDate] = useState("2026-01-01");
   const [endDate, setEndDate] = useState("2026-12-31");
   const [reportGenerated, setReportGenerated] = useState(true);
 
-  // 1. Calculations: Debts Report
-  const debtsReportData = customers.map((c) => {
-    const custInvoices = invoices.filter((inv) => inv.customerId === c.id);
-    const totalInvoiced = custInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
-    const totalRemaining = custInvoices.reduce((acc, inv) => acc + inv.remainingAmount, 0);
-    const totalPaid = totalInvoiced - totalRemaining;
+  // Active non-deleted folders
+  const activeFolders = useMemo(() => {
+    return folders.filter((f) => !f.isDeleted);
+  }, [folders]);
 
-    // Get last invoice date
-    let lastActive = "لا يوجد";
-    if (custInvoices.length > 0) {
-      const sorted = [...custInvoices].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      lastActive = sorted[0].date;
+  // Build hierarchical folder list for dropdown (الكل -> المجلدات -> المجلدات الفرعية)
+  const hierarchicalFolderOptions = useMemo(() => {
+    const list: FolderOption[] = [];
+    const visited = new Set<string>();
+
+    const traverse = (parentId: string | null, depth: number) => {
+      const children = activeFolders.filter((f) => {
+        if (!parentId) {
+          return !f.parentId;
+        }
+        return f.parentId === parentId;
+      });
+
+      // Sort alphabetically for clean presentation
+      children.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+
+      for (const child of children) {
+        if (visited.has(child.id)) continue;
+        visited.add(child.id);
+
+        let prefix = "";
+        if (depth > 0) {
+          prefix = "— ".repeat(depth);
+        }
+
+        list.push({
+          id: child.id,
+          name: child.name,
+          depth,
+          prefix,
+          isSubfolder: depth > 0,
+        });
+
+        traverse(child.id, depth + 1);
+      }
+    };
+
+    traverse(null, 0);
+
+    // Also include any orphan active folders if parentId does not exist in activeFolders
+    for (const f of activeFolders) {
+      if (!visited.has(f.id)) {
+        list.push({
+          id: f.id,
+          name: f.name,
+          depth: 0,
+          prefix: "",
+          isSubfolder: false,
+        });
+      }
+    }
+
+    return list;
+  }, [activeFolders]);
+
+  // Recursively collect all descendant folder IDs for a selected folder
+  const targetFolderIds = useMemo(() => {
+    if (selectedFolderId === "all") return null;
+
+    const ids = new Set<string>([selectedFolderId]);
+    const queue = [selectedFolderId];
+
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      const children = activeFolders.filter((f) => f.parentId === currentId);
+      for (const child of children) {
+        if (!ids.has(child.id)) {
+          ids.add(child.id);
+          queue.push(child.id);
+        }
+      }
+    }
+
+    return ids;
+  }, [selectedFolderId, activeFolders]);
+
+  // Selected folder object & breadcrumb label
+  const selectedFolderInfo = useMemo(() => {
+    if (selectedFolderId === "all") {
+      return { name: "الكل (جميع المجلدات)", isSub: false };
+    }
+    const found = activeFolders.find((f) => f.id === selectedFolderId);
+    if (!found) return { name: "مجلد محدد", isSub: false };
+
+    // Build path trail e.g. "المجلد الرئيسي / المجلد الفرعي"
+    const trail: string[] = [];
+    let curr: CustomerFolder | undefined = found;
+    const visited = new Set<string>();
+    while (curr && !visited.has(curr.id)) {
+      visited.add(curr.id);
+      trail.unshift(curr.name);
+      if (curr.parentId) {
+        curr = activeFolders.find((f) => f.id === curr!.parentId);
+      } else {
+        break;
+      }
     }
 
     return {
-      name: c.name,
-      phone: c.phone,
-      totalInvoiced,
-      totalPaid,
-      totalRemaining,
-      lastActive,
+      name: trail.join(" / "),
+      isSub: !!found.parentId,
     };
-  }).filter((c) => c.totalInvoiced > 0);
+  }, [selectedFolderId, activeFolders]);
 
-  const debtsReportSummary = {
-    totalDebts: debtsReportData.reduce((acc, c) => acc + c.totalRemaining, 0),
-    totalCollected: debtsReportData.reduce((acc, c) => acc + c.totalPaid, 0),
-    totalOverall: debtsReportData.reduce((acc, c) => acc + c.totalInvoiced, 0),
-  };
+  // Filter customers based on selected folder (including subfolders)
+  const scopedCustomers = useMemo(() => {
+    if (!targetFolderIds) {
+      return customers;
+    }
+    return customers.filter((c) => c.folderId && targetFolderIds.has(c.folderId));
+  }, [customers, targetFolderIds]);
+
+  // Map of scoped customer IDs for quick lookup in invoices and payments
+  const scopedCustomerIds = useMemo(() => {
+    return new Set(scopedCustomers.map((c) => c.id));
+  }, [scopedCustomers]);
+
+  // Scoped invoices
+  const scopedInvoices = useMemo(() => {
+    if (!targetFolderIds) return invoices;
+    return invoices.filter((inv) => scopedCustomerIds.has(inv.customerId));
+  }, [invoices, targetFolderIds, scopedCustomerIds]);
+
+  // Scoped payments
+  const scopedPayments = useMemo(() => {
+    if (!targetFolderIds) return payments;
+    return payments.filter((p) => p.customerId && scopedCustomerIds.has(p.customerId));
+  }, [payments, targetFolderIds, scopedCustomerIds]);
+
+  // 1. Calculations: Debts Report
+  const debtsReportData = useMemo(() => {
+    return scopedCustomers
+      .map((c) => {
+        const custInvoices = scopedInvoices.filter((inv) => inv.customerId === c.id);
+        const totalInvoiced = custInvoices.reduce((acc, inv) => acc + inv.grandTotal, 0);
+        const totalRemaining = custInvoices.reduce((acc, inv) => acc + inv.remainingAmount, 0);
+        const totalPaid = totalInvoiced - totalRemaining;
+
+        // Get last invoice date
+        let lastActive = "لا يوجد";
+        if (custInvoices.length > 0) {
+          const sorted = [...custInvoices].sort(
+            (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+          );
+          lastActive = sorted[0].date;
+        }
+
+        // Folder name for customer
+        const custFolder = c.folderId ? activeFolders.find((f) => f.id === c.folderId) : null;
+
+        return {
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          folderName: custFolder ? custFolder.name : "عام",
+          totalInvoiced,
+          totalPaid,
+          totalRemaining,
+          lastActive,
+        };
+      })
+      .filter((c) => c.totalInvoiced > 0);
+  }, [scopedCustomers, scopedInvoices, activeFolders]);
+
+  const debtsReportSummary = useMemo(() => {
+    return {
+      totalDebts: debtsReportData.reduce((acc, c) => acc + c.totalRemaining, 0),
+      totalCollected: debtsReportData.reduce((acc, c) => acc + c.totalPaid, 0),
+      totalOverall: debtsReportData.reduce((acc, c) => acc + c.totalInvoiced, 0),
+      totalCustomers: debtsReportData.length,
+      settledCustomersCount: debtsReportData.filter((c) => c.totalRemaining <= 0).length,
+      unsettledCustomersCount: debtsReportData.filter((c) => c.totalRemaining > 0).length,
+    };
+  }, [debtsReportData]);
 
   // 2. Calculations: Collections Report within range
-  const collectionsReportData = payments.filter((p) => {
-    const pDate = new Date(p.date);
-    const sDate = new Date(startDate);
-    const eDate = new Date(endDate);
-    return pDate >= sDate && pDate <= eDate;
-  });
+  const collectionsReportData = useMemo(() => {
+    return scopedPayments.filter((p) => {
+      const pDate = new Date(p.date);
+      const sDate = new Date(startDate);
+      const eDate = new Date(endDate);
+      return pDate >= sDate && pDate <= eDate;
+    });
+  }, [scopedPayments, startDate, endDate]);
 
-  const collectionsReportSummary = {
-    totalCollected: collectionsReportData.reduce((acc, p) => acc + p.amount, 0),
-  };
+  const collectionsReportSummary = useMemo(() => {
+    return {
+      totalCollected: collectionsReportData.reduce((acc, p) => acc + p.amount, 0),
+      count: collectionsReportData.length,
+    };
+  }, [collectionsReportData]);
 
   // 3. Calculations: Inventory Report
-  const inventoryReportData = products.map((p) => {
-    const totalCost = p.purchasePrice * p.quantity;
-    const totalRetail = p.salePrice * p.quantity;
-    const potentialProfit = totalRetail - totalCost;
+  const inventoryReportData = useMemo(() => {
+    return products.map((p) => {
+      const totalCost = p.purchasePrice * p.quantity;
+      const totalRetail = p.salePrice * p.quantity;
+      const potentialProfit = totalRetail - totalCost;
 
+      return {
+        ...p,
+        totalCost,
+        totalRetail,
+        potentialProfit,
+      };
+    });
+  }, [products]);
+
+  const inventoryReportSummary = useMemo(() => {
     return {
-      ...p,
-      totalCost,
-      totalRetail,
-      potentialProfit,
+      totalItems: products.reduce((acc, p) => acc + p.quantity, 0),
+      totalCost: products.reduce((acc, p) => acc + p.purchasePrice * p.quantity, 0),
+      totalRetail: products.reduce((acc, p) => acc + p.salePrice * p.quantity, 0),
     };
-  });
-
-  const inventoryReportSummary = {
-    totalItems: products.reduce((acc, p) => acc + p.quantity, 0),
-    totalCost: products.reduce((acc, p) => acc + p.purchasePrice * p.quantity, 0),
-    totalRetail: products.reduce((acc, p) => acc + p.salePrice * p.quantity, 0),
-  };
+  }, [products]);
 
   const handlePrint = () => {
     window.print();
@@ -110,11 +286,11 @@ export default function ReportsView({
             مركز التقارير المالية والمحاسبية المصدقة
           </h1>
           <p className="text-[11px] text-slate-500">
-            حدد نوع التقرير وعناصر الفلترة ثم أنشئ التقارير وصدرها للطباعة أو الحفظ كملف PDF بشكل رسمي.
+            حدد نوع التقرير والمجلد المطلوب وعناصر الفلترة ثم أنشئ التقارير وصدرها للطباعة أو الحفظ كملف PDF بشكل رسمي.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
           {/* Report Type */}
           <div className="space-y-1">
             <label className="block text-slate-500 text-[11px] font-semibold">نوع التقرير المالي</label>
@@ -130,6 +306,35 @@ export default function ReportsView({
               <option value="collections">💰 تقرير حركة المقبوضات والتحصيلات في فترة</option>
               <option value="inventory">📦 تقرير جرد المخزون وحركة الأصول السلعية</option>
             </select>
+          </div>
+
+          {/* Folder Selector (عرض حسب: الكل / المجلدات / المجلدات الفرعية) */}
+          <div className="space-y-1">
+            <label className="block text-slate-500 text-[11px] font-semibold flex items-center justify-between">
+              <span>عرض حسب:</span>
+              {selectedFolderId !== "all" && (
+                <span className="text-[10px] text-blue-600 font-bold">مصفّى حسب المجلد</span>
+              )}
+            </label>
+            <div className="relative">
+              <select
+                value={selectedFolderId}
+                onChange={(e) => setSelectedFolderId(e.target.value)}
+                className="w-full p-2 pr-2 pl-7 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold focus:outline-blue-500 appearance-none text-slate-800"
+              >
+                <option value="all">📂 الكل (جميع المجلدات)</option>
+                {hierarchicalFolderOptions.length > 0 && (
+                  <optgroup label="المجلدات والمجلدات الفرعية">
+                    {hierarchicalFolderOptions.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.prefix}{f.isSubfolder ? "📁 " : "📁 "}{f.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
           </div>
 
           {/* Date Range - Only shows for Collections */}
@@ -156,10 +361,10 @@ export default function ReportsView({
             </>
           )}
 
-          <div className="flex gap-2 justify-end md:col-start-4">
+          <div className="flex gap-2 justify-end sm:col-span-2 lg:col-span-1 lg:col-start-4">
             <button
               onClick={handlePrint}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+              className="w-full sm:w-auto px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
             >
               <Printer className="w-4 h-4" /> طباعة التقرير الحالي
             </button>
@@ -195,13 +400,21 @@ export default function ReportsView({
           </div>
 
           {/* Report Title Banner */}
-          <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-200/80">
+          <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-200/80 space-y-1.5">
             <h3 className="text-sm font-extrabold text-slate-900">
               {reportType === "debts" && "تقرير أرصدة ذمم مديونيات العملاء الإجمالية"}
               {reportType === "collections" && `تقرير حركة المقبوضات والتحصيلات في الفترة من [${startDate}] إلى [${endDate}]`}
               {reportType === "inventory" && "تقرير جرد المواد ومستوى الأصول وقيم الربحية بالمخزن"}
             </h3>
-            <p className="text-[10px] text-slate-500 mt-1">
+            
+            {/* Display Active Folder Scope Badge */}
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-slate-200 rounded-full text-[11px] font-bold text-slate-700 shadow-2xs">
+              <FolderTree className="w-3.5 h-3.5 text-blue-600" />
+              <span>نطاق العرض:</span>
+              <span className="text-blue-700">{selectedFolderInfo.name}</span>
+            </div>
+
+            <p className="text-[10px] text-slate-500">
               تقرير آلي دقيق مصدّر من خادم المحاسبة وسجل الديون الإلكتروني.
             </p>
           </div>
@@ -214,6 +427,7 @@ export default function ReportsView({
                   <thead>
                     <tr className="bg-slate-100/80 border-b-2 border-slate-300 text-slate-700 font-bold">
                       <th className="p-2.5">العميل المدين</th>
+                      <th className="p-2.5">الحافظة / المجلد</th>
                       <th className="p-2.5">رقم الهاتف</th>
                       <th className="p-2.5 text-left">إجمالي المبيعات</th>
                       <th className="p-2.5 text-left">إجمالي المسدد</th>
@@ -222,16 +436,30 @@ export default function ReportsView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono">
-                    {debtsReportData.map((c, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-2.5 font-sans font-bold text-slate-900">{c.name}</td>
-                        <td className="p-2.5 text-slate-600">{c.phone}</td>
-                        <td className="p-2.5 text-left text-slate-700 font-semibold">{c.totalInvoiced.toLocaleString()}</td>
-                        <td className="p-2.5 text-left text-blue-600 font-semibold">{c.totalPaid.toLocaleString()}</td>
-                        <td className="p-2.5 text-left text-rose-600 font-extrabold">{c.totalRemaining.toLocaleString()}</td>
-                        <td className="p-2.5 text-center font-sans text-slate-400 text-[10px]">{c.lastActive}</td>
+                    {debtsReportData.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400 font-sans text-xs">
+                          لا توجد مديونيات أو عملاء في هذا المجلد.
+                        </td>
                       </tr>
-                    ))}
+                    ) : (
+                      debtsReportData.map((c, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-2.5 font-sans font-bold text-slate-900">{c.name}</td>
+                          <td className="p-2.5 font-sans text-slate-600 text-[11px]">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                              <Folder className="w-2.5 h-2.5 text-slate-500" />
+                              <span>{c.folderName}</span>
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-slate-600">{c.phone}</td>
+                          <td className="p-2.5 text-left text-slate-700 font-semibold">{c.totalInvoiced.toLocaleString()}</td>
+                          <td className="p-2.5 text-left text-blue-600 font-semibold">{c.totalPaid.toLocaleString()}</td>
+                          <td className="p-2.5 text-left text-rose-600 font-extrabold">{c.totalRemaining.toLocaleString()}</td>
+                          <td className="p-2.5 text-center font-sans text-slate-400 text-[10px]">{c.lastActive}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -251,6 +479,22 @@ export default function ReportsView({
                   <p className="text-base font-black text-rose-600 underline">{debtsReportSummary.totalDebts.toLocaleString()} {settings.currency}</p>
                 </div>
               </div>
+
+              {/* Customers & Settlement Statistics for this Folder */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50/60 p-3.5 rounded-xl border border-slate-200/70">
+                <div className="flex items-center justify-between px-2">
+                  <span className="text-slate-500 font-medium">عدد الزبائن في النطاق:</span>
+                  <span className="font-bold text-slate-800 font-mono text-sm">{debtsReportSummary.totalCustomers}</span>
+                </div>
+                <div className="flex items-center justify-between px-2 sm:border-r border-slate-200">
+                  <span className="text-emerald-700 font-medium">الزبائن المسددين بالكامل:</span>
+                  <span className="font-bold text-emerald-800 font-mono text-sm">{debtsReportSummary.settledCustomersCount}</span>
+                </div>
+                <div className="flex items-center justify-between px-2 sm:border-r border-slate-200">
+                  <span className="text-rose-700 font-medium">الزبائن المتبقي عليهم ديون:</span>
+                  <span className="font-bold text-rose-800 font-mono text-sm">{debtsReportSummary.unsettledCustomersCount}</span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -258,7 +502,7 @@ export default function ReportsView({
           {reportType === "collections" && (
             <div className="space-y-6">
               {collectionsReportData.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-xs">لا توجد تحصيلات مسجلة في هذا النطاق الزمني المحدد.</div>
+                <div className="text-center py-12 text-slate-400 text-xs">لا توجد تحصيلات مسجلة في هذا النطاق الزمني أو المجلد المحدد.</div>
               ) : (
                 <div className="space-y-6">
                   <div className="overflow-x-auto">
