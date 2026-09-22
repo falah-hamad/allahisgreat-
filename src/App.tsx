@@ -111,14 +111,18 @@ export default function App() {
     setNativeUnlockError(null);
     const result = await authenticateWithBiometrics("استخدم بصمتك أو Face Unlock لفتح التطبيق");
 
-    if (result.success || result.unsupported) {
+    if (result.success) {
       setNativeUnlockPending(false);
       setNativeUnlockError(null);
       return true;
     }
 
     setNativeUnlockPending(false);
-    setNativeUnlockError("تعذر تأكيد هويتك. أعد المحاولة للمتابعة إلى التطبيق.");
+    setNativeUnlockError(
+      result.unsupported
+        ? "هذا الجهاز لا يدعم البصمة أو Face Unlock المطلوبة لهذا الحساب. استخدم جهازاً مدعوماً أو عطّل الميزة من جلسة أخرى."
+        : "تعذر تأكيد هويتك. أعد المحاولة للمتابعة إلى التطبيق.",
+    );
     return false;
   }, [isNativeBiometricLockEnabled]);
 

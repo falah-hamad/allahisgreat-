@@ -1,4 +1,4 @@
-package com.getcapacitor.myapp;
+package com.falahhamad.deftaraldeyon;
 
 import static org.junit.Assert.*;
 

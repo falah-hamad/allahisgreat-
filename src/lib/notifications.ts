@@ -20,6 +20,13 @@ import { isNativeAndroid, requestNativePushPermissionDetailed } from "./native";
 let messagingInstance: Messaging | null = null;
 let messagingSupported: boolean | null = null;
 
+function generateSecureId(prefix: string) {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const suffix = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${prefix}_${Date.now()}_${suffix}`;
+}
+
 /**
  * Check if the current browser and context support Firebase Cloud Messaging (FCM)
  */
@@ -299,7 +306,7 @@ export async function dispatchAccountingNotification(
 ): Promise<void> {
   if (!userId) return;
 
-  const notifId = notification.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const notifId = notification.id || generateSecureId("notif");
 
   // Strict deduplication: Do not re-dispatch the exact same notification ID in the current session
   if (processedNotificationIds.has(notifId)) {
@@ -397,7 +404,7 @@ export async function saveInAppNotification(
 ): Promise<void> {
   if (!userId) return;
   try {
-    const notifId = notification.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const notifId = notification.id || generateSecureId("notif");
     const notifRef = doc(db, "users", userId, "notifications", notifId);
     const item: AppNotification = {
       id: notifId,
@@ -570,4 +577,3 @@ export async function setupForegroundNotificationListener(
     return null;
   }
 }
-

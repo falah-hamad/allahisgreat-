@@ -20,9 +20,9 @@ export async function takeNativePhoto() {
   });
 }
 
-export async function pickNativeFiles(readData = false) {
+export async function pickNativeFiles(readData = false, limit = 10) {
   if (!isNativeAndroid()) return null;
-  return FilePicker.pickFiles({ limit: 1, readData });
+  return FilePicker.pickFiles({ limit, readData });
 }
 
 export async function authenticateWithBiometrics(reason = 'تأكيد هويتك للوصول إلى التطبيق') {
