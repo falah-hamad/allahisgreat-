@@ -27,6 +27,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { useAuth, ConfirmationResult } from '../contexts/AuthContext';
+import { isNativeAndroid } from '../lib/native';
 import { COUNTRY_CODES, formatInternationalPhoneNumber, CountryCode } from '../utils/countryCodes';
 
 interface AuthModalProps {
@@ -683,15 +684,17 @@ export default function AuthModal({ onSuccess, onClose, initialMode = 'login' }:
                     <RefreshCw className="w-3 h-3" />
                     <span>إعادة محاولة Google</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleOpenInNewWindow}
-                    className="px-2.5 py-1 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-                    title="فتح في نافذة مستقلة جديدة لتفادي قيود الإطار"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                    <span>فتح بنافذة مستقلة</span>
-                  </button>
+                  {!isNativeAndroid() && (
+                    <button
+                      type="button"
+                      onClick={handleOpenInNewWindow}
+                      className="px-2.5 py-1 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                      title="فتح في نافذة مستقلة جديدة لتفادي قيود الإطار"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>فتح بنافذة مستقلة</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleDemoLogin}

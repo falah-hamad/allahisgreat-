@@ -19,6 +19,7 @@ import {
   DollarSign
 } from "lucide-react";
 import { Invoice, Customer, SystemSettings } from "../types";
+import { openExternalUrl } from "../lib/native";
 import {
   isInvoiceOverdue,
   getInvoiceOverdueDays,
@@ -137,7 +138,7 @@ export default function OverdueInvoicesAlert({
     const cleanPhone = phone.replace(/[^0-9]/g, "");
     const encoded = encodeURIComponent(text);
     const url = `https://wa.me/${cleanPhone}?text=${encoded}`;
-    window.open(url, "_blank");
+    void openExternalUrl(url);
   };
 
   const handleStartEditDueDate = (inv: Invoice) => {

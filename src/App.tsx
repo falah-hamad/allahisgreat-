@@ -13,7 +13,7 @@ import {
   deleteNotification,
   clearAllNotifications,
 } from "./lib/notifications";
-import { authenticateWithBiometrics, isNativeAndroid } from "./lib/native";
+import { authenticateWithBiometrics, isNativeAndroid, saveNativeJsonFile } from "./lib/native";
 import AuthModal from "./components/AuthModal";
 import AccountManagerModal from "./components/AccountManagerModal";
 import NotificationCenterModal from "./components/NotificationCenterModal";
@@ -225,7 +225,7 @@ export default function App() {
 
 
   // Quick export backup helper for Account Manager
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     try {
       const timestamp = new Date().toISOString();
       const backupData = {
@@ -245,10 +245,16 @@ export default function App() {
           settings,
         },
       };
-      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(backupData, null, 2))}`;
+      const fileName = `store_backup_${currentUser?.email?.split('@')[0] || 'account'}_${timestamp.slice(0, 10)}.json`;
+      const rawJson = JSON.stringify(backupData, null, 2);
+      if (isNativeAndroid()) {
+        await saveNativeJsonFile(fileName, rawJson);
+        return;
+      }
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(rawJson)}`;
       const downloadAnchor = document.createElement("a");
       downloadAnchor.setAttribute("href", jsonString);
-      downloadAnchor.setAttribute("download", `store_backup_${currentUser?.email?.split('@')[0] || 'account'}_${timestamp.slice(0, 10)}.json`);
+      downloadAnchor.setAttribute("download", fileName);
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();

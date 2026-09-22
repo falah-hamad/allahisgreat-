@@ -16,6 +16,7 @@ import {
   Check
 } from "lucide-react";
 import { Customer, Invoice, Payment, SystemSettings, Folder } from "../types";
+import { openExternalUrl } from "../lib/native";
 
 interface OverdueDebtorsViewProps {
   customers: Customer[];
@@ -147,7 +148,7 @@ ${settings.companyName || "محلات العاشق"}`;
 
     const cleanPhone = debtor.customer.phone.replace(/[^0-9]/g, "");
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
-    window.open(url, "_blank");
+    void openExternalUrl(url);
   };
 
   return (

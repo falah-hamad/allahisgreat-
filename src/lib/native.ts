@@ -1,4 +1,5 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
@@ -39,6 +40,17 @@ export async function authenticateWithBiometrics(reason = 'تأكيد هويتك
 
 export const setNativePreference = (key: string, value: string) => Preferences.set({ key, value });
 export const getNativePreference = async (key: string) => (await Preferences.get({ key })).value;
+
+export async function openExternalUrl(url: string) {
+  if (!url) return;
+  if (isNativeAndroid()) {
+    await Browser.open({ url });
+    return;
+  }
+  if (typeof window !== 'undefined') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
 
 export function saveNativeTextFile(path: string, content: string) {
   return Filesystem.writeFile({
