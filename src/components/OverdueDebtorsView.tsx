@@ -41,6 +41,14 @@ export default function OverdueDebtorsView({
   const [selectedFolderFilter, setSelectedFolderFilter] = useState("all");
   const [sortBy, setSortBy] = useState<"remaining-desc" | "remaining-asc" | "name">("remaining-desc");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    window.setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? null : prev));
+    }, 2800);
+  };
 
   // Single Source of Truth: Active only, calculate metrics per customer
   const debtors = useMemo(() => {
@@ -134,7 +142,7 @@ ${settings.companyName || "محلات العاشق"} - ${settings.companyPhone |
     });
   };
 
-  const handleWhatsAppShare = (debtor: typeof debtors[0]) => {
+  const handleWhatsAppShare = async (debtor: typeof debtors[0]) => {
     const text = `السلام عليكم ورحمة الله وبركاته،
 الأخ الفاضل / ${debtor.customer.name} المحترم 🌹
 
@@ -148,11 +156,21 @@ ${settings.companyName || "محلات العاشق"}`;
 
     const cleanPhone = debtor.customer.phone.replace(/[^0-9]/g, "");
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
-    void openExternalUrl(url);
+    const opened = await openExternalUrl(url);
+    if (!opened) {
+      showToast("تعذر فتح واتساب على هذا الجهاز. انسخ الرسالة وأرسلها يدوياً.");
+    }
   };
 
   return (
     <div className="space-y-6" dir="rtl">
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-5 py-2.5 rounded-xl shadow-2xl text-xs font-semibold flex items-center gap-2 border border-slate-700 animate-fade-in">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Header Card */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200/90 shadow-xs">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

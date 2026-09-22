@@ -44,7 +44,7 @@ export const getNativePreference = async (key: string) => (await Preferences.get
 export async function openExternalUrl(url: string): Promise<boolean> {
   if (!url) return false;
   try {
-    if (isNativeAndroid()) {
+    if (Capacitor.isNativePlatform()) {
       await Browser.open({ url });
       return true;
     }

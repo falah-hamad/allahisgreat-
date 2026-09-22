@@ -134,11 +134,14 @@ export default function OverdueInvoicesAlert({
     showToast(`تم نسخ ${label} إلى الحافظة بنجاح!`);
   };
 
-  const handleOpenWhatsApp = (phone: string, text: string) => {
+  const handleOpenWhatsApp = async (phone: string, text: string) => {
     const cleanPhone = phone.replace(/[^0-9]/g, "");
     const encoded = encodeURIComponent(text);
     const url = `https://wa.me/${cleanPhone}?text=${encoded}`;
-    void openExternalUrl(url);
+    const opened = await openExternalUrl(url);
+    if (!opened) {
+      showToast("تعذر فتح واتساب على هذا الجهاز. انسخ الرسالة وأرسلها يدوياً.");
+    }
   };
 
   const handleStartEditDueDate = (inv: Invoice) => {
