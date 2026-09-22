@@ -11,7 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+      ANDROID_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout repository
@@ -21,7 +25,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -35,19 +39,35 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Detect optional Android config
+        id: detect-android-config
+        shell: bash
+        run: |
+          if [ -n "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "has_google_services=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_google_services=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Inject google-services.json when provided
-        if: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 != '' }}
-        run: printf '%s' '${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}' | base64 --decode > android/app/google-services.json
+        if: ${{ steps.detect-android-config.outputs.has_google_services == 'true' }}
+        run: printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
 
       - name: Inject release keystore when provided
-        if: env.HAS_ANDROID_SIGNING == 'true'
+        if: ${{ steps.detect-android-config.outputs.has_signing == 'true' }}
         run: |
-          printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
           {
             echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android/app/release.keystore"
-            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
-            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
-            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+            echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
       - name: Sync Capacitor Android project
@@ -60,7 +80,7 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Build release AAB
-        if: env.HAS_ANDROID_SIGNING == 'true'
+        if: ${{ steps.detect-android-config.outputs.has_signing == 'true' }}
         working-directory: android
         run: ./gradlew bundleRelease --stacktrace
 
@@ -70,7 +90,7 @@ jobs:
           ls -lh android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Verify release AAB
-        if: env.HAS_ANDROID_SIGNING == 'true'
+        if: ${{ steps.detect-android-config.outputs.has_signing == 'true' }}
         run: |
           test -f android/app/build/outputs/bundle/release/app-release.aab
           ls -lh android/app/build/outputs/bundle/release/app-release.aab
@@ -84,7 +104,7 @@ jobs:
           retention-days: 14
 
       - name: Upload release AAB
-        if: env.HAS_ANDROID_SIGNING == 'true'
+        if: ${{ steps.detect-android-config.outputs.has_signing == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: android-release-aab
