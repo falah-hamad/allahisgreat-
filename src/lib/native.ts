@@ -41,15 +41,20 @@ export async function authenticateWithBiometrics(reason = 'تأكيد هويتك
 export const setNativePreference = (key: string, value: string) => Preferences.set({ key, value });
 export const getNativePreference = async (key: string) => (await Preferences.get({ key })).value;
 
-export async function openExternalUrl(url: string) {
-  if (!url) return;
-  if (isNativeAndroid()) {
-    await Browser.open({ url });
-    return;
+export async function openExternalUrl(url: string): Promise<boolean> {
+  if (!url) return false;
+  try {
+    if (isNativeAndroid()) {
+      await Browser.open({ url });
+      return true;
+    }
+    if (typeof window !== 'undefined') {
+      return Boolean(window.open(url, '_blank', 'noopener,noreferrer'));
+    }
+  } catch {
+    return false;
   }
-  if (typeof window !== 'undefined') {
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
+  return false;
 }
 
 export function saveNativeTextFile(path: string, content: string) {
