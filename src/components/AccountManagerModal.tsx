@@ -26,6 +26,7 @@ import {
   Save,
   Mail,
   Phone,
+  Camera,
   Building2,
   Briefcase,
   Calendar,
@@ -42,6 +43,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { SystemSettings } from "../types";
 import { db, enableNetwork, waitForPendingWrites } from "../lib/firebase";
 import { requestNotificationPermissionDetailed, isFCMSupported } from "../lib/notifications";
+import { authenticateWithBiometrics, isNativeAndroid, pickNativeImageFile } from "../lib/native";
 
 interface AccountManagerModalProps {
   isOpen: boolean;
@@ -189,8 +191,7 @@ export default function AccountManagerModal({
   };
 
   // Image Upload handler (Base64)
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const applyAvatarFile = (file?: File | null) => {
     if (!file) return;
 
     if (file.size > 1.5 * 1024 * 1024) {
@@ -206,6 +207,20 @@ export default function AccountManagerModal({
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    applyAvatarFile(e.target.files?.[0]);
+  };
+
+  const handleNativeAvatarPick = async (source: "gallery" | "camera") => {
+    try {
+      const file = await pickNativeImageFile(source);
+      if (!file) return;
+      applyAvatarFile(file);
+    } catch (err) {
+      showToast(source === "camera" ? "تعذر التقاط صورة الحساب." : "تعذر اختيار صورة الحساب من هاتفك.", "error");
+    }
   };
 
   // 3. Security: Password Change
@@ -975,6 +990,25 @@ export default function AccountManagerModal({
                           <span>رفع صورة من جهازك</span>
                           <input type="file" accept="image/*" onChange={handleImageFileUpload} className="hidden" />
                         </label>
+                        {isNativeAndroid() && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleNativeAvatarPick("gallery")}
+                              className="px-3 py-1.5 bg-white border border-slate-300 hover:border-blue-500 rounded-lg text-xs font-medium text-slate-700 transition-colors shadow-2xs"
+                            >
+                              المعرض
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleNativeAvatarPick("camera")}
+                              className="px-3 py-1.5 bg-white border border-slate-300 hover:border-blue-500 rounded-lg text-xs font-medium text-slate-700 transition-colors shadow-2xs flex items-center gap-1.5"
+                            >
+                              <Camera className="w-3.5 h-3.5 text-blue-600" />
+                              كاميرا
+                            </button>
+                          </>
+                        )}
                         {photoURL && (
                           <button
                             type="button"
@@ -1340,9 +1374,26 @@ export default function AccountManagerModal({
                       type="button"
                       onClick={async () => {
                         const nextVal = !twoFactorActive;
+                        if (nextVal && isNativeAndroid()) {
+                          const biometricResult = await authenticateWithBiometrics("استخدم بصمتك أو Face Unlock لتفعيل الحماية الإضافية");
+                          if (biometricResult.unsupported) {
+                            showToast("هذا الجهاز لا يدعم التحقق الحيوي المطلوب لتفعيل الحماية الإضافية.", "error");
+                            return;
+                          }
+                          if (!biometricResult.success) {
+                            showToast("تعذر تأكيد هويتك ببصمة الإصبع أو Face Unlock.", "error");
+                            return;
+                          }
+                        }
                         setTwoFactorActive(nextVal);
                         await updateUserProfile({ twoFactorEnabled: nextVal });
-                        showToast(nextVal ? "تم تفعيل التحقق بخطوتين بنجاح!" : "تم تعطيل التحقق بخطوتين.");
+                        showToast(
+                          nextVal
+                            ? (isNativeAndroid()
+                              ? "تم تفعيل قفل الحساب بالبصمة/الوجه بنجاح!"
+                              : "تم تفعيل التحقق بخطوتين بنجاح!")
+                            : "تم تعطيل التحقق بخطوتين.",
+                        );
                         if (nextVal) setShowBackupCode(true);
                       }}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer ${

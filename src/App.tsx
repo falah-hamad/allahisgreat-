@@ -1,5 +1,6 @@
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { Menu, Calendar, BookOpen, User, Building2, ShieldAlert, BellRing, Bell, LogOut, Cloud, WifiOff, Wifi } from "lucide-react";
+import { App as CapApp } from "@capacitor/app";
 import { useAccountingData } from "./hooks/useAccountingData";
 import { isInvoiceOverdue } from "./utils/overdueUtils";
 import { useAuth } from "./contexts/AuthContext";
@@ -12,6 +13,7 @@ import {
   deleteNotification,
   clearAllNotifications,
 } from "./lib/notifications";
+import { authenticateWithBiometrics, isNativeAndroid } from "./lib/native";
 import AuthModal from "./components/AuthModal";
 import AccountManagerModal from "./components/AccountManagerModal";
 import NotificationCenterModal from "./components/NotificationCenterModal";
@@ -33,7 +35,7 @@ import FileManagerView from "./components/FileManagerView";
 import OverdueDebtorsView from "./components/OverdueDebtorsView";
 
 export default function App() {
-  const { currentUser, isGuest, continueAsGuest, loading: authLoading, logout } = useAuth();
+  const { currentUser, extendedProfile, isGuest, continueAsGuest, loading: authLoading, logout } = useAuth();
 
   const {
     folders,
@@ -93,7 +95,36 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [showReconnectedBanner, setShowReconnectedBanner] = useState<boolean>(false);
   const hadBeenOfflineRef = useRef<boolean>(!navigator.onLine);
+  const [nativeUnlockPending, setNativeUnlockPending] = useState(false);
+  const [nativeUnlockError, setNativeUnlockError] = useState<string | null>(null);
 
+  const isNativeBiometricLockEnabled = Boolean(currentUser && extendedProfile.twoFactorEnabled && isNativeAndroid());
+
+  const requestNativeUnlock = useCallback(async () => {
+    if (!isNativeBiometricLockEnabled) {
+      setNativeUnlockPending(false);
+      setNativeUnlockError(null);
+      return true;
+    }
+
+    setNativeUnlockPending(true);
+    setNativeUnlockError(null);
+    const result = await authenticateWithBiometrics("استخدم بصمتك أو Face Unlock لفتح التطبيق");
+
+    if (result.success) {
+      setNativeUnlockPending(false);
+      setNativeUnlockError(null);
+      return true;
+    }
+
+    setNativeUnlockPending(false);
+    setNativeUnlockError(
+      result.unsupported
+        ? "هذا الجهاز لا يدعم البصمة أو Face Unlock المطلوبة لهذا الحساب. استخدم جهازاً مدعوماً أو عطّل الميزة من جلسة أخرى."
+        : "تعذر تأكيد هويتك. أعد المحاولة للمتابعة إلى التطبيق.",
+    );
+    return false;
+  }, [isNativeBiometricLockEnabled]);
 
   useEffect(() => {
     let reconnectTimeout: any = null;
@@ -121,6 +152,34 @@ export default function App() {
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isNativeBiometricLockEnabled) {
+      setNativeUnlockPending(false);
+      setNativeUnlockError(null);
+      return;
+    }
+    void requestNativeUnlock();
+  }, [isNativeBiometricLockEnabled, requestNativeUnlock]);
+
+  useEffect(() => {
+    if (!isNativeAndroid()) return;
+
+    let isMounted = true;
+    let listenerHandle: { remove: () => Promise<void> } | undefined;
+
+    CapApp.addListener("appStateChange", ({ isActive }) => {
+      if (!isMounted || !isActive || !isNativeBiometricLockEnabled) return;
+      void requestNativeUnlock();
+    }).then((handle) => {
+      listenerHandle = handle;
+    });
+
+    return () => {
+      isMounted = false;
+      listenerHandle?.remove();
+    };
+  }, [isNativeBiometricLockEnabled, requestNativeUnlock]);
 
   // Detect Firebase password reset links in URL (?mode=resetPassword&oobCode=...)
   useEffect(() => {
@@ -288,6 +347,41 @@ export default function App() {
         <div className="flex flex-col items-center gap-3">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
           <p className="text-xs font-bold text-slate-600">يجري مزامنة البيانات السحابية من Cloud Firestore...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isNativeBiometricLockEnabled && (nativeUnlockPending || nativeUnlockError)) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-5" dir="rtl">
+        <div className="w-full max-w-sm bg-slate-800/90 border border-slate-700 rounded-3xl p-6 text-center shadow-2xl space-y-4">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-600/20 border border-blue-400/30 flex items-center justify-center">
+            <ShieldAlert className="w-7 h-7 text-blue-300" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-base font-extrabold">التطبيق مقفل بالحماية الحيوية</h2>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              استخدم بصمتك أو Face Unlock للوصول إلى بياناتك السحابية المحمية داخل التطبيق.
+            </p>
+          </div>
+          {nativeUnlockPending ? (
+            <div className="flex flex-col items-center gap-3 py-2">
+              <div className="w-10 h-10 border-4 border-blue-400 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-bold text-slate-200">بانتظار تأكيد الهوية من Android…</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-rose-300">{nativeUnlockError}</p>
+              <button
+                type="button"
+                onClick={() => void requestNativeUnlock()}
+                className="w-full px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors"
+              >
+                إعادة المحاولة
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

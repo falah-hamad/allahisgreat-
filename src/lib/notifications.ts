@@ -1,4 +1,5 @@
 import { getMessaging, getToken, onMessage, isSupported, Messaging } from "firebase/messaging";
+import { PushNotifications } from "@capacitor/push-notifications";
 import {
   doc,
   setDoc,
@@ -14,15 +15,27 @@ import {
 import { app, db, auth } from "./firebase";
 import { AppNotification, NotificationCategory } from "../types";
 import { linkFcmTokenToSession, getOrCreateCurrentSessionId } from "./sessionManager";
+import { isNativeAndroid, requestNativePushPermissionDetailed } from "./native";
 
 let messagingInstance: Messaging | null = null;
 let messagingSupported: boolean | null = null;
+
+function generateSecureId(prefix: string) {
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  const suffix = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${prefix}_${Date.now()}_${suffix}`;
+}
 
 /**
  * Check if the current browser and context support Firebase Cloud Messaging (FCM)
  */
 export async function isFCMSupported(): Promise<boolean> {
   if (messagingSupported !== null) return messagingSupported;
+  if (isNativeAndroid()) {
+    messagingSupported = true;
+    return true;
+  }
   try {
     messagingSupported = typeof window !== "undefined" && "Notification" in window && (await isSupported());
     return messagingSupported;
@@ -84,6 +97,53 @@ export type NotificationPermissionResult = {
  * Supports multiple devices per user without replacing other devices.
  */
 export async function requestNotificationPermissionDetailed(userId?: string): Promise<NotificationPermissionResult> {
+  if (isNativeAndroid()) {
+    try {
+      const nativeResult = await requestNativePushPermissionDetailed();
+      if (nativeResult.status !== "granted" || !nativeResult.token) {
+        return {
+          status: nativeResult.status,
+          token: nativeResult.token || null,
+          message: nativeResult.message,
+        };
+      }
+
+      const targetUid = userId || auth.currentUser?.uid;
+      if (targetUid) {
+        const tokenId = btoa(nativeResult.token.slice(-36)).replace(/[/+=]/g, "_");
+        const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
+
+        await setDoc(tokenRef, {
+          id: tokenId,
+          userId: targetUid,
+          token: nativeResult.token,
+          platform: "android",
+          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "android-native",
+          lastActiveAt: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+
+        try {
+          const currentSessionId = getOrCreateCurrentSessionId();
+          await linkFcmTokenToSession(targetUid, currentSessionId, nativeResult.token);
+        } catch (sessErr) {
+          console.warn("Could not link token to session:", sessErr);
+        }
+      }
+
+      return {
+        status: "granted",
+        token: nativeResult.token,
+        message: "تم تفعيل إشعارات Android الأصلية وتسجيل الجهاز بنجاح.",
+      };
+    } catch (err: any) {
+      return {
+        status: "unsupported",
+        message: err?.message || "تعذر تفعيل إشعارات Android الأصلية.",
+      };
+    }
+  }
+
   if (typeof window === "undefined" || !("Notification" in window)) {
     return {
       status: "unsupported",
@@ -185,6 +245,7 @@ export const registerDeviceToken = requestNotificationPermission;
  * Display a local notification if granted
  */
 export function showLocalNotification(title: string, options?: NotificationOptions) {
+  if (isNativeAndroid()) return;
   if (typeof window === "undefined" || !("Notification" in window)) return;
 
   if (Notification.permission === "granted") {
@@ -245,7 +306,7 @@ export async function dispatchAccountingNotification(
 ): Promise<void> {
   if (!userId) return;
 
-  const notifId = notification.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const notifId = notification.id || generateSecureId("notif");
 
   // Strict deduplication: Do not re-dispatch the exact same notification ID in the current session
   if (processedNotificationIds.has(notifId)) {
@@ -343,7 +404,7 @@ export async function saveInAppNotification(
 ): Promise<void> {
   if (!userId) return;
   try {
-    const notifId = notification.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const notifId = notification.id || generateSecureId("notif");
     const notifRef = doc(db, "users", userId, "notifications", notifId);
     const item: AppNotification = {
       id: notifId,
@@ -461,6 +522,29 @@ export async function clearAllNotifications(userId: string, notifications: AppNo
 export async function setupForegroundNotificationListener(
   onNotificationReceived: (payload: any) => void
 ): Promise<(() => void) | null> {
+  if (isNativeAndroid()) {
+    try {
+      const listener = await PushNotifications.addListener("pushNotificationReceived", (notification) => {
+        onNotificationReceived(notification);
+        const title = notification.title || "دفتر الديون المحاسبي";
+        const body = notification.body || "إشعار جديد";
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          saveInAppNotification(currentUser.uid, {
+            title,
+            body,
+            category: (notification.data?.category as NotificationCategory) || "general",
+            data: notification.data,
+          });
+        }
+      });
+      return () => void listener.remove();
+    } catch (e) {
+      console.warn("Notice: Native foreground notification listener:", e);
+      return null;
+    }
+  }
+
   const messaging = await getFCMInstance();
   if (!messaging) return null;
 
@@ -493,5 +577,3 @@ export async function setupForegroundNotificationListener(
     return null;
   }
 }
-
-
