@@ -72,6 +72,7 @@ jobs:
       - name: Verify release AAB
         if: env.HAS_ANDROID_SIGNING == 'true'
         run: |
+          test -f android/app/build/outputs/bundle/release/app-release.aab
           ls -lh android/app/build/outputs/bundle/release/app-release.aab
 
       - name: Upload debug APK
