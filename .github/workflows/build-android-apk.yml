@@ -71,8 +71,8 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
-      - name: Sync Capacitor Android project
-        run: npx cap sync android
+      - name: Build web assets and sync Capacitor Android project
+        run: npm run cap:sync
 
       - name: Build debug APK
         working-directory: android
