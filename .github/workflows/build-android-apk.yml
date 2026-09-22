@@ -1,24 +1,21 @@
-name: Build Android APK from Web App
+name: Build Android artifacts
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  migrate-and-build:
+  build-android:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
     env:
-      GEMINI_CLI_TRUST_WORKSPACE: "true"
+      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -26,191 +23,71 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Run Gemini CLI Android migration
-        uses: google-github-actions/run-gemini-cli@v0.1.22
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          gemini_model: gemini-3.5-flash
-          gemini_debug: false
-          prompt: |
-            Inspect the complete web application in this repository.
+          node-version: "20"
+          cache: npm
 
-            Your task is to rebuild the existing web application as a genuine
-            native Android application and generate a working debug APK.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-            Do not assume the application's name, purpose or features.
-            Discover everything by inspecting the repository.
+      - name: Install dependencies
+        run: npm ci
 
-            First inspect all relevant files, including:
+      - name: Inject google-services.json when provided
+        if: ${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 != '' }}
+        run: printf '%s' '${{ secrets.ANDROID_GOOGLE_SERVICES_JSON_BASE64 }}' | base64 --decode > android/app/google-services.json
 
-            - src
-            - public
-            - assets
-            - package.json
-            - TypeScript files
-            - JavaScript files
-            - CSS files
-            - HTML files
-            - configuration files
-            - images and icons
-            - localStorage logic
-            - calculations and business logic
-            - screens and components
-            - navigation and user interactions
-            - API and service files
-
-            Identify:
-
-            - The correct application name
-            - The application's purpose
-            - All screens and components
-            - All working features
-            - Navigation and user flows
-            - Forms, buttons and validation
-            - Calculations and business logic
-            - Saved user data
-            - Images, icons and visual styling
-            - Browser-only functionality
-            - External APIs and environment variables
-
-            Keep the original web application unchanged.
-
-            Create the native Android application inside a new folder named:
-
-            android-app
-
-            Android requirements:
-
-            - Kotlin
-            - Jetpack Compose
-            - Material 3
-            - Gradle Kotlin DSL
-            - Minimum SDK 24
-            - Target the Android SDK currently available in GitHub Actions
-            - Single-activity architecture
-            - ViewModels where appropriate
-            - Responsive Android phone layouts
-            - Appropriate native Android local storage
-            - Complete Android manifest and resources
-            - Working Gradle wrapper
-
-            App identity requirements:
-
-            - Determine the app name from the existing web application.
-            - Preserve the detected app name.
-            - Generate a valid Android package name based on the app or repository name.
-            - Use a lowercase package name containing only valid characters.
-            - Do not use com.neducate.
-            - Keep the package name consistent throughout the Android project.
-
-            Migration requirements:
-
-            - Preserve the original application's purpose.
-            - Preserve all major working features.
-            - Preserve all calculations and business logic.
-            - Preserve validation and saved user data.
-            - Preserve screens, navigation and user interactions.
-            - Preserve the visual identity as closely as possible.
-            - Recreate forms, buttons, cards, lists and dialogs.
-            - Reuse suitable images, icons and assets.
-            - Replace browser localStorage with Android local storage.
-            - Replace browser-only APIs with native Android alternatives.
-            - Replace browser navigation with Compose navigation.
-            - Use Android permissions only when genuinely required.
-            - Do not use WebView.
-            - Do not use Capacitor.
-            - Do not wrap or display the existing website.
-            - Do not invent unrelated features.
-            - Do not remove important features merely to make the project compile.
-            - Do not modify or delete the original web project.
-            - Do not place private API keys or credentials inside the Android app.
-
-            External services:
-
-            - Inspect whether the app uses APIs, authentication, databases or AI services.
-            - Preserve integrations when they can be safely used on Android.
-            - Never hardcode private server credentials.
-            - Use placeholders or BuildConfig values when configuration is unavailable.
-            - Do not silently remove features that require external configuration.
-
-            Build requirements:
-
-            - Create a complete compilable Android Gradle project.
-            - Include all required settings and build files.
-            - Include all required Kotlin source files.
-            - Include all required Compose screens and components.
-            - Include all required resources and manifest entries.
-            - Include a working Gradle wrapper.
-            - Run the debug build.
-            - Inspect and repair compilation errors.
-            - Continue fixing errors until the APK builds successfully unless
-              a genuine external blocking issue prevents completion.
-
-            The expected APK path is:
-
-            android-app/app/build/outputs/apk/debug/app-debug.apk
-
-            Before finishing, verify that:
-
-            - The original web project remains unchanged.
-            - The android-app folder contains a complete native Android project.
-            - The detected app name is used.
-            - The generated package name is valid and consistent.
-            - The major screens and features are present.
-            - Browser-only functionality has native Android replacements.
-            - The Gradle build completes successfully.
-            - The debug APK exists at the expected location.
-
-      - name: Check Android project
+      - name: Inject release keystore when provided
+        if: env.HAS_ANDROID_SIGNING == 'true'
         run: |
-          if [ ! -d "android-app" ]; then
-            echo "Gemini CLI did not create the android-app folder."
-            exit 1
-          fi
+          printf '%s' "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
+          {
+            echo "ANDROID_KEYSTORE_PATH=$GITHUB_WORKSPACE/android/app/release.keystore"
+            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> "$GITHUB_ENV"
 
-      - name: Check Gradle wrapper
-        run: |
-          if [ ! -f "android-app/gradlew" ]; then
-            echo "The Gradle wrapper was not created."
-            exit 1
-          fi
-
-          chmod +x android-app/gradlew
-
-      - name: Commit generated Android project
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add android-app
-
-          if git diff --cached --quiet; then
-            echo "No Android project changes to commit."
-          else
-            git commit -m "feat: rebuild web app as native Android app"
-            git push
-          fi
+      - name: Sync Capacitor Android project
+        run: npx cap sync android
 
       - name: Build debug APK
-        working-directory: android-app
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Verify APK
+        working-directory: android
         run: |
-          APK_PATH="android-app/app/build/outputs/apk/debug/app-debug.apk"
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --stacktrace
 
-          if [ ! -f "$APK_PATH" ]; then
-            echo "APK was not found at: $APK_PATH"
-            exit 1
-          fi
+      - name: Build release AAB
+        if: env.HAS_ANDROID_SIGNING == 'true'
+        working-directory: android
+        run: ./gradlew bundleRelease --stacktrace
 
-          echo "APK generated successfully:"
-          ls -lh "$APK_PATH"
+      - name: Verify debug APK
+        run: |
+          test -f android/app/build/outputs/apk/debug/app-debug.apk
+          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload APK
+      - name: Verify release AAB
+        if: env.HAS_ANDROID_SIGNING == 'true'
+        run: |
+          test -f android/app/build/outputs/bundle/release/app-release.aab
+          ls -lh android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Generated-Android-APK
-          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release AAB
+        if: env.HAS_ANDROID_SIGNING == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 14
