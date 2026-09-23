@@ -15,7 +15,7 @@ import {
 import { app, db, auth } from "./firebase";
 import { AppNotification, NotificationCategory } from "../types";
 import { linkFcmTokenToSession, getOrCreateCurrentSessionId } from "./sessionManager";
-import { ensureNativeNotificationChannel, isNativeAndroid, requestNativePushPermissionDetailed } from "./native";
+import { ensureNativeNotificationChannel, isNativeAndroid, registerNativePushToken, requestNativePushPermissionDetailed } from "./native";
 
 let messagingInstance: Messaging | null = null;
 let messagingSupported: boolean | null = null;
@@ -246,7 +246,7 @@ export async function syncNotificationTokenIfPermitted(userId?: string): Promise
       await ensureNativeNotificationChannel();
       const permission = await PushNotifications.checkPermissions();
       if (permission.receive !== "granted") return null;
-      const nativeResult = await requestNativePushPermissionDetailed();
+      const nativeResult = await registerNativePushToken();
       if (nativeResult.status !== "granted") return null;
 
       const token = nativeResult.token || null;

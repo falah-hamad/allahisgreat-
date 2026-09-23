@@ -231,23 +231,11 @@ type NativePushPermissionResult = {
   message?: string;
 };
 
-export async function requestNativePushPermissionDetailed(): Promise<NativePushPermissionResult> {
+export async function registerNativePushToken(): Promise<NativePushPermissionResult> {
   if (!isNativeAndroid()) {
     return {
       status: 'unsupported',
       message: 'التسجيل الأصلي لإشعارات Android غير متاح في هذه البيئة.',
-    };
-  }
-
-  let permission = await PushNotifications.checkPermissions();
-  if (permission.receive !== 'granted') {
-    permission = await PushNotifications.requestPermissions();
-  }
-
-  if (permission.receive !== 'granted') {
-    return {
-      status: 'denied',
-      message: 'لم يتم منح إذن إشعارات Android لهذا التطبيق.',
     };
   }
 
@@ -284,6 +272,28 @@ export async function requestNativePushPermissionDetailed(): Promise<NativePushP
       });
     }, 15000);
   });
+}
+
+export async function requestNativePushPermissionDetailed(): Promise<NativePushPermissionResult> {
+  if (!isNativeAndroid()) {
+    return {
+      status: 'unsupported',
+      message: 'التسجيل الأصلي لإشعارات Android غير متاح في هذه البيئة.',
+    };
+  }
+
+  let permission = await PushNotifications.checkPermissions();
+  if (permission.receive !== 'granted') {
+    permission = await PushNotifications.requestPermissions();
+  }
+
+  if (permission.receive !== 'granted') {
+    return {
+      status: 'denied',
+      message: 'لم يتم منح إذن إشعارات Android لهذا التطبيق.',
+    };
+  }
+  return registerNativePushToken();
 }
 
 export async function registerNativePushNotifications(

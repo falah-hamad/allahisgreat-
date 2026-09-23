@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Bell, Camera, CheckCircle2, FolderUp, ShieldCheck, Smartphone } from "lucide-react";
 import { requestNotificationPermissionDetailed } from "../lib/notifications";
 import {
@@ -229,6 +229,7 @@ interface FirstUseCoachMarksProps {
 
 export function FirstUseCoachMarks({ currentTab, setCurrentTab, onComplete }: FirstUseCoachMarksProps) {
   const [stepIndex, setStepIndex] = useState(0);
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const step = coachSteps[stepIndex];
 
   useEffect(() => {
@@ -237,22 +238,33 @@ export function FirstUseCoachMarks({ currentTab, setCurrentTab, onComplete }: Fi
     }
   }, [currentTab, setCurrentTab, step]);
 
-  const targetRect = useMemo(() => {
-    const el = document.getElementById(step.targetId);
-    if (!el) return null;
-    return el.getBoundingClientRect();
+  useEffect(() => {
+    const updateRect = () => {
+      const el = document.getElementById(step.targetId);
+      setTargetRect(el ? el.getBoundingClientRect() : null);
+    };
+    updateRect();
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
   }, [step, currentTab, stepIndex]);
 
   useEffect(() => {
     const el = document.getElementById(step.targetId);
     if (!el) return;
-    const old = el.style.boxShadow;
+    const oldShadow = el.style.boxShadow;
+    const oldPosition = el.style.position;
+    const oldZIndex = el.style.zIndex;
     el.style.boxShadow = "0 0 0 3px rgba(59,130,246,0.95), 0 0 0 9999px rgba(2,6,23,0.45)";
     el.style.position = el.style.position || "relative";
     el.style.zIndex = "70";
     return () => {
-      el.style.boxShadow = old;
-      el.style.zIndex = "";
+      el.style.boxShadow = oldShadow;
+      el.style.position = oldPosition;
+      el.style.zIndex = oldZIndex;
     };
   }, [step, currentTab, stepIndex]);
 
