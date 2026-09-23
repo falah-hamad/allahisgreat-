@@ -33,9 +33,6 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Verify Java version
         run: java -version
 
