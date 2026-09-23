@@ -59,6 +59,10 @@ jobs:
         if: ${{ steps.detect-android-config.outputs.has_google_services == 'true' }}
         run: printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
 
+      - name: Remove bundled google-services.json when secret is not provided
+        if: ${{ steps.detect-android-config.outputs.has_google_services != 'true' }}
+        run: rm -f android/app/google-services.json
+
       - name: Inject release keystore when provided
         if: ${{ steps.detect-android-config.outputs.has_signing == 'true' }}
         run: |
