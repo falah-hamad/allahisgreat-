@@ -86,6 +86,57 @@ export async function registerMessagingServiceWorker(): Promise<ServiceWorkerReg
   }
 }
 
+async function syncWebTokenWithGrantedPermission(userId?: string): Promise<string | null> {
+  const messaging = await getFCMInstance();
+  const swRegistration = await registerMessagingServiceWorker();
+
+  const vapidKey = (import.meta as any).env?.VITE_FIREBASE_VAPID_KEY || undefined;
+  const tokenOptions: { serviceWorkerRegistration?: ServiceWorkerRegistration; vapidKey?: string } = {};
+  if (swRegistration) {
+    tokenOptions.serviceWorkerRegistration = swRegistration;
+  }
+  if (vapidKey && typeof vapidKey === "string" && vapidKey.trim().length > 0) {
+    tokenOptions.vapidKey = vapidKey.trim();
+  }
+
+  let currentToken: string | null = null;
+  if (messaging) {
+    currentToken = await getToken(messaging, tokenOptions).catch((err) => {
+      console.info("FCM getToken notice (VAPID key / origin context):", err);
+      return null;
+    });
+  }
+
+  const targetUid = userId || auth.currentUser?.uid;
+  if (currentToken && targetUid) {
+    const tokenId = btoa(currentToken.slice(-36)).replace(/[/+=]/g, "_");
+    const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
+
+    const isAndroid = /android/i.test(navigator.userAgent);
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const platformName = isAndroid ? "android" : isIOS ? "ios" : "web";
+
+    await setDoc(tokenRef, {
+      id: tokenId,
+      userId: targetUid,
+      token: currentToken,
+      platform: platformName,
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "web-browser",
+      lastActiveAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    try {
+      const currentSessionId = getOrCreateCurrentSessionId();
+      await linkFcmTokenToSession(targetUid, currentSessionId, currentToken);
+    } catch (sessErr) {
+      console.warn("Could not link token to session:", sessErr);
+    }
+  }
+
+  return currentToken;
+}
+
 export type NotificationPermissionResult = {
   status: "granted" | "denied" | "unsupported" | "dismissed";
   token?: string | null;
@@ -172,54 +223,7 @@ export async function requestNotificationPermissionDetailed(userId?: string): Pr
       };
     }
 
-    // Permission granted! Now obtain FCM Token
-    const messaging = await getFCMInstance();
-    const swRegistration = await registerMessagingServiceWorker();
-
-    const vapidKey = (import.meta as any).env?.VITE_FIREBASE_VAPID_KEY || undefined;
-    const tokenOptions: { serviceWorkerRegistration?: ServiceWorkerRegistration; vapidKey?: string } = {};
-    if (swRegistration) {
-      tokenOptions.serviceWorkerRegistration = swRegistration;
-    }
-    if (vapidKey && typeof vapidKey === "string" && vapidKey.trim().length > 0) {
-      tokenOptions.vapidKey = vapidKey.trim();
-    }
-
-    let currentToken: string | null = null;
-    if (messaging) {
-      currentToken = await getToken(messaging, tokenOptions).catch((err) => {
-        console.info("FCM getToken notice (VAPID key / origin context):", err);
-        return null;
-      });
-    }
-
-    const targetUid = userId || auth.currentUser?.uid;
-    if (currentToken && targetUid) {
-      const tokenId = btoa(currentToken.slice(-36)).replace(/[/+=]/g, "_");
-      const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
-
-      const isAndroid = /android/i.test(navigator.userAgent);
-      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-      const platformName = isAndroid ? "android" : isIOS ? "ios" : "web";
-
-      await setDoc(tokenRef, {
-        id: tokenId,
-        userId: targetUid,
-        token: currentToken,
-        platform: platformName,
-        userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "web-browser",
-        lastActiveAt: new Date().toISOString(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-
-      // Link FCM token to the current device session in Firestore
-      try {
-        const currentSessionId = getOrCreateCurrentSessionId();
-        await linkFcmTokenToSession(targetUid, currentSessionId, currentToken);
-      } catch (sessErr) {
-        console.warn("Could not link token to session:", sessErr);
-      }
-    }
+    const currentToken = await syncWebTokenWithGrantedPermission(userId);
 
     return {
       status: "granted",
@@ -274,7 +278,7 @@ export async function syncNotificationTokenIfPermitted(userId?: string): Promise
     return null;
   }
 
-  return requestNotificationPermission(userId);
+  return syncWebTokenWithGrantedPermission(userId);
 }
 
 export const registerDeviceToken = requestNotificationPermission;

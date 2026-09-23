@@ -177,7 +177,7 @@ export function FirstLaunchOnboarding({ userId, onComplete }: FirstLaunchOnboard
             <button
               type="button"
               onClick={() => void openNativeAppSettings()}
-              className="text-xs text-blue-300 hover:text-blue-200 underline"
+              className="text-xs text-blue-100 hover:text-white underline"
             >
               فتح إعدادات Android للأذونات
             </button>
@@ -300,7 +300,7 @@ export function FirstUseCoachMarks({ currentTab, setCurrentTab, onComplete }: Fi
             جارٍ الانتقال للواجهة المناسبة...
           </p>
         )}
-        {isNativeAndroid() && step.id === "header-notification" && (
+        {isNativeAndroid() && !targetRect && (
           <button
             type="button"
             onClick={() => void openNativeAppSettings()}

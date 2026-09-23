@@ -3,12 +3,20 @@ const COACH_MARKS_COMPLETED_KEY = "acc_coach_marks_completed_v1";
 
 function readFlag(key: string) {
   if (typeof window === "undefined") return false;
-  return localStorage.getItem(key) === "true";
+  try {
+    return localStorage.getItem(key) === "true";
+  } catch {
+    return false;
+  }
 }
 
 function writeFlag(key: string, value: boolean) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(key, value ? "true" : "false");
+  try {
+    localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // ignore storage failures in restricted contexts
+  }
 }
 
 export function isFirstLaunchCompleted() {

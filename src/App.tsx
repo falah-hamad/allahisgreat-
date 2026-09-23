@@ -375,6 +375,17 @@ export default function App() {
     return <AuthModal onClose={() => continueAsGuest()} />;
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans" dir="rtl">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-bold text-slate-600">يجري مزامنة البيانات السحابية من Cloud Firestore...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (showFirstLaunchOnboarding) {
     return (
       <FirstLaunchOnboarding
@@ -390,17 +401,6 @@ export default function App() {
           setShowCoachMarks(!isCoachMarksCompleted());
         }}
       />
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center font-sans" dir="rtl">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-xs font-bold text-slate-600">يجري مزامنة البيانات السحابية من Cloud Firestore...</p>
-        </div>
-      </div>
     );
   }
 
