@@ -229,6 +229,7 @@ export default function CustomersView({
               </p>
             </div>
             <button
+              id="customers-btn-add"
               onClick={() => {
                 setName("");
                 setPhone("");
@@ -248,6 +249,7 @@ export default function CustomersView({
             <div className="relative flex-1">
               <Search className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
               <input
+                id="customers-search-input"
                 type="text"
                 placeholder="ابحث عن العميل بالاسم، رقم الهاتف أو العنوان..."
                 value={searchQuery}

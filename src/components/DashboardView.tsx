@@ -309,6 +309,7 @@ export default function DashboardView({
         <h2 className="text-sm font-semibold text-slate-700 mb-4">إجراءات سريعة واختصارات</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <button
+            id="dashboard-quick-add-invoice"
             onClick={onOpenNewInvoiceModal}
             className="flex flex-col items-center justify-center p-4 bg-blue-50/60 hover:bg-blue-50 text-blue-800 border border-blue-100 rounded-xl transition-all group"
           >
@@ -317,6 +318,7 @@ export default function DashboardView({
           </button>
 
           <button
+            id="dashboard-quick-add-payment"
             onClick={onOpenNewPaymentModal}
             className="flex flex-col items-center justify-center p-4 bg-blue-50 hover:bg-blue-100/80 text-blue-800 border border-blue-100 rounded-xl transition-all group"
           >
@@ -325,6 +327,7 @@ export default function DashboardView({
           </button>
 
           <button
+            id="dashboard-quick-add-customer"
             onClick={onOpenNewCustomerModal}
             className="flex flex-col items-center justify-center p-4 bg-blue-50 hover:bg-blue-100/80 text-blue-800 border border-blue-100 rounded-xl transition-all group"
           >
@@ -333,6 +336,7 @@ export default function DashboardView({
           </button>
 
           <button
+            id="dashboard-quick-add-product"
             onClick={onOpenNewProductModal}
             className="flex flex-col items-center justify-center p-4 bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 rounded-xl transition-all group"
           >

@@ -28,16 +28,27 @@ import {
   Image as ImageIcon,
   Loader2,
   Calendar,
+  Bell,
+  Camera,
+  Fingerprint,
+  Shield,
+  RefreshCcw,
+  KeyRound,
 } from "lucide-react";
 import { SystemSettings, CloudBackupItem } from "../types";
 import { useAuth } from "../contexts/AuthContext";
 import { uploadUserFile, deleteUserFileByUrl } from "../lib/firebase";
 import {
+  checkNativePermissionsStatus,
   isNativeAndroid,
+  openNativeAppSettings,
   pickNativeImageFile,
   pickNativeJsonFile,
+  requestNativeCameraAndPhotosPermission,
   saveNativeJsonFile,
 } from "../lib/native";
+import { requestNotificationPermissionDetailed } from "../lib/notifications";
+import { resetFirstLaunchExperience } from "../lib/firstLaunch";
 
 interface SettingsViewProps {
   settings: SystemSettings;
@@ -73,7 +84,7 @@ export default function SettingsView({
   onRestoreCloudBackup,
   onDeleteCloudBackup,
 }: SettingsViewProps) {
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, extendedProfile, updateUserProfile } = useAuth();
   const [companyName, setCompanyName] = useState(settings.companyName);
   const [companyPhone, setCompanyPhone] = useState(settings.companyPhone);
   const [companyAddress, setCompanyAddress] = useState(settings.companyAddress);
@@ -94,8 +105,26 @@ export default function SettingsView({
     setSignaturePlaceholder(settings.signaturePlaceholder || "");
   }, [settings]);
 
+  React.useEffect(() => {
+    setLocalBiometricLock(extendedProfile.twoFactorEnabled ?? false);
+    setLocalNotifDebts(extendedProfile.dueDebtAlerts ?? true);
+    setLocalNotifPayments(extendedProfile.paymentAlerts ?? true);
+    setLocalNotifBackup(extendedProfile.backupAlerts ?? true);
+  }, [extendedProfile]);
+
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [savingSecurity, setSavingSecurity] = useState(false);
+  const [localBiometricLock, setLocalBiometricLock] = useState(extendedProfile.twoFactorEnabled ?? false);
+  const [localNotifDebts, setLocalNotifDebts] = useState(extendedProfile.dueDebtAlerts ?? true);
+  const [localNotifPayments, setLocalNotifPayments] = useState(extendedProfile.paymentAlerts ?? true);
+  const [localNotifBackup, setLocalNotifBackup] = useState(extendedProfile.backupAlerts ?? true);
+  const [permissionStatus, setPermissionStatus] = useState({
+    notifications: "unknown",
+    camera: "unknown",
+    photos: "unknown",
+    biometric: false,
+  });
 
   const handleLogoFile = async (file?: File | null) => {
     if (!file || !currentUser) return;
@@ -182,6 +211,63 @@ export default function SettingsView({
   const showMsg = (type: "success" | "error", text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
+  };
+
+  const refreshPermissionStatus = React.useCallback(async () => {
+    if (!isNativeAndroid()) {
+      setPermissionStatus({
+        notifications: typeof Notification !== "undefined" ? Notification.permission : "unsupported",
+        camera: "unsupported",
+        photos: "unsupported",
+        biometric: false,
+      });
+      return;
+    }
+
+    const status = await checkNativePermissionsStatus();
+    setPermissionStatus({
+      notifications: status.notifications,
+      camera: status.camera,
+      photos: status.photos,
+      biometric: status.biometricAvailable,
+    });
+  }, []);
+
+  React.useEffect(() => {
+    void refreshPermissionStatus();
+  }, [refreshPermissionStatus]);
+
+  const saveSecurityAndNotificationPrefs = async () => {
+    try {
+      setSavingSecurity(true);
+      await updateUserProfile({
+        twoFactorEnabled: localBiometricLock,
+        dueDebtAlerts: localNotifDebts,
+        paymentAlerts: localNotifPayments,
+        backupAlerts: localNotifBackup,
+      });
+      showMsg("success", "تم حفظ إعدادات الأمان والإشعارات بنجاح.");
+    } catch {
+      showMsg("error", "تعذر حفظ إعدادات الأمان والإشعارات.");
+    } finally {
+      setSavingSecurity(false);
+    }
+  };
+
+  const handleEnableNotificationsPermission = async () => {
+    const result = await requestNotificationPermissionDetailed(currentUser?.uid);
+    if (result.status === "granted") {
+      showMsg("success", "تم تفعيل إشعارات التطبيق بنجاح.");
+    } else {
+      showMsg("error", result.message || "لم يتم منح إذن الإشعارات.");
+    }
+    await refreshPermissionStatus();
+  };
+
+  const handleEnableCameraPermission = async () => {
+    if (!isNativeAndroid()) return;
+    await requestNativeCameraAndPhotosPermission();
+    await refreshPermissionStatus();
   };
 
   // State for pending file import preview/confirmation
@@ -385,6 +471,139 @@ export default function SettingsView({
           <span>{message.text}</span>
         </div>
       )}
+
+      <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-blue-600" />
+            الأمان والإشعارات والخصوصية
+          </h2>
+          <button
+            type="button"
+            onClick={() => void refreshPermissionStatus()}
+            className="self-start sm:self-auto px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-1.5"
+          >
+            <RefreshCcw className="w-3.5 h-3.5" />
+            تحديث حالة الصلاحيات
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                <Fingerprint className="w-4 h-4 text-purple-600" />
+                قفل التطبيق بالبصمة/Face Unlock
+              </span>
+              {(!isNativeAndroid() || !permissionStatus.biometric) && (
+                <p className="text-[10px] text-amber-700">غير متاح على هذا الجهاز حالياً.</p>
+              )}
+            </div>
+            <input
+              type="checkbox"
+              checked={localBiometricLock}
+              disabled={!isNativeAndroid() || !permissionStatus.biometric}
+              onChange={(e) => setLocalBiometricLock(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </div>
+
+          <label className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+            <span className="font-bold text-slate-700 flex items-center gap-1.5">
+              <Bell className="w-4 h-4 text-blue-600" />
+              تنبيهات الديون المستحقة
+            </span>
+            <input
+              type="checkbox"
+              checked={localNotifDebts}
+              onChange={(e) => setLocalNotifDebts(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </label>
+
+          <label className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+            <span className="font-bold text-slate-700">تنبيهات تسجيل الدفعات</span>
+            <input
+              type="checkbox"
+              checked={localNotifPayments}
+              onChange={(e) => setLocalNotifPayments(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </label>
+
+          <label className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+            <span className="font-bold text-slate-700">تنبيهات النسخ الاحتياطي</span>
+            <input
+              type="checkbox"
+              checked={localNotifBackup}
+              onChange={(e) => setLocalNotifBackup(e.target.checked)}
+              className="w-4 h-4"
+            />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2">
+            <div className="font-bold text-slate-800">حالة إذن الإشعارات</div>
+            <div className="text-slate-500">الحالة الحالية: <strong>{permissionStatus.notifications}</strong></div>
+            <button
+              type="button"
+              onClick={() => void handleEnableNotificationsPermission()}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700"
+            >
+              طلب/تفعيل الإذن
+            </button>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Camera className="w-4 h-4 text-blue-600" />
+              حالة إذن الكاميرا/الصور
+            </div>
+            <div className="text-slate-500">
+              الكاميرا: <strong>{permissionStatus.camera}</strong> — الصور: <strong>{permissionStatus.photos}</strong>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleEnableCameraPermission()}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700"
+            >
+              طلب إذن الكاميرا
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={savingSecurity}
+            onClick={() => void saveSecurityAndNotificationPrefs()}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            حفظ إعدادات الأمان والإشعارات
+          </button>
+          {isNativeAndroid() && (
+            <button
+              type="button"
+              onClick={() => void openNativeAppSettings()}
+              className="px-4 py-2 rounded-lg border border-slate-300 text-xs font-bold hover:bg-slate-50"
+            >
+              فتح إعدادات Android
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              resetFirstLaunchExperience();
+              showMsg("success", "تمت إعادة تهيئة دليل البداية وسيظهر الشرح مباشرة.");
+              window.dispatchEvent(new Event("acc-restart-onboarding"));
+            }}
+            className="px-4 py-2 rounded-lg border border-blue-300 text-blue-700 text-xs font-bold hover:bg-blue-50"
+          >
+            إعادة مشاهدة الشرح
+          </button>
+        </div>
+      </div>
 
       {/* Cloud Account & Firebase Status */}
       <div className="bg-white rounded-xl border border-blue-100 shadow-sm p-6 space-y-4">

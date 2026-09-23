@@ -1,5 +1,6 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
@@ -19,6 +20,71 @@ export async function takeNativePhoto() {
     resultType: CameraResultType.Uri,
     quality: 90,
   });
+}
+
+export async function checkNativePermissionsStatus() {
+  const result = {
+    notifications: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'unsupported',
+    camera: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'limited' | 'unsupported',
+    photos: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'limited' | 'unsupported',
+    biometricAvailable: false,
+  };
+
+  if (!isNativeAndroid()) return result;
+
+  try {
+    const push = await PushNotifications.checkPermissions();
+    result.notifications = push.receive;
+  } catch {}
+
+  try {
+    const cameraPermissions = await Camera.checkPermissions();
+    result.camera = cameraPermissions.camera;
+    result.photos = cameraPermissions.photos;
+  } catch {}
+
+  try {
+    const bio = await BiometricAuth.checkBiometry();
+    result.biometricAvailable = Boolean(bio.isAvailable);
+  } catch {}
+
+  return result;
+}
+
+export async function requestNativeCameraAndPhotosPermission() {
+  if (!isNativeAndroid()) {
+    return { camera: 'unsupported', photos: 'unsupported' } as const;
+  }
+  return Camera.requestPermissions({ permissions: ['camera', 'photos'] });
+}
+
+export async function ensureNativeNotificationChannel() {
+  if (!isNativeAndroid()) return;
+  try {
+    await PushNotifications.createChannel({
+      id: 'accounting_alerts',
+      name: 'التنبيهات المحاسبية',
+      description: 'تنبيهات الديون والدفعات والنسخ الاحتياطي',
+      importance: 4,
+      visibility: 1,
+      sound: 'default',
+    });
+  } catch {
+    // Channel may already exist
+  }
+}
+
+export async function openNativeAppSettings() {
+  if (!isNativeAndroid()) return false;
+  try {
+    if (typeof (CapacitorApp as any).openSettings === 'function') {
+      await (CapacitorApp as any).openSettings();
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export async function pickNativeFiles(readData = false, limit = 10) {
@@ -165,23 +231,11 @@ type NativePushPermissionResult = {
   message?: string;
 };
 
-export async function requestNativePushPermissionDetailed(): Promise<NativePushPermissionResult> {
+export async function registerNativePushToken(): Promise<NativePushPermissionResult> {
   if (!isNativeAndroid()) {
     return {
       status: 'unsupported',
       message: 'التسجيل الأصلي لإشعارات Android غير متاح في هذه البيئة.',
-    };
-  }
-
-  let permission = await PushNotifications.checkPermissions();
-  if (permission.receive !== 'granted') {
-    permission = await PushNotifications.requestPermissions();
-  }
-
-  if (permission.receive !== 'granted') {
-    return {
-      status: 'denied',
-      message: 'لم يتم منح إذن إشعارات Android لهذا التطبيق.',
     };
   }
 
@@ -218,6 +272,28 @@ export async function requestNativePushPermissionDetailed(): Promise<NativePushP
       });
     }, 15000);
   });
+}
+
+export async function requestNativePushPermissionDetailed(): Promise<NativePushPermissionResult> {
+  if (!isNativeAndroid()) {
+    return {
+      status: 'unsupported',
+      message: 'التسجيل الأصلي لإشعارات Android غير متاح في هذه البيئة.',
+    };
+  }
+
+  let permission = await PushNotifications.checkPermissions();
+  if (permission.receive !== 'granted') {
+    permission = await PushNotifications.requestPermissions();
+  }
+
+  if (permission.receive !== 'granted') {
+    return {
+      status: 'denied',
+      message: 'لم يتم منح إذن إشعارات Android لهذا التطبيق.',
+    };
+  }
+  return registerNativePushToken();
 }
 
 export async function registerNativePushNotifications(
