@@ -15,7 +15,7 @@ import {
 import { app, db, auth } from "./firebase";
 import { AppNotification, NotificationCategory } from "../types";
 import { linkFcmTokenToSession, getOrCreateCurrentSessionId } from "./sessionManager";
-import { isNativeAndroid, requestNativePushPermissionDetailed } from "./native";
+import { ensureNativeNotificationChannel, isNativeAndroid, requestNativePushPermissionDetailed } from "./native";
 
 let messagingInstance: Messaging | null = null;
 let messagingSupported: boolean | null = null;
@@ -99,6 +99,7 @@ export type NotificationPermissionResult = {
 export async function requestNotificationPermissionDetailed(userId?: string): Promise<NotificationPermissionResult> {
   if (isNativeAndroid()) {
     try {
+      await ensureNativeNotificationChannel();
       const nativeResult = await requestNativePushPermissionDetailed();
       if (nativeResult.status !== "granted" || !nativeResult.token) {
         return {
@@ -106,6 +107,42 @@ export async function requestNotificationPermissionDetailed(userId?: string): Pr
           token: nativeResult.token || null,
           message: nativeResult.message,
         };
+      }
+
+      export async function syncNotificationTokenIfPermitted(userId?: string): Promise<string | null> {
+        if (isNativeAndroid()) {
+          try {
+            await ensureNativeNotificationChannel();
+            const permission = await PushNotifications.checkPermissions();
+            if (permission.receive !== "granted") return null;
+            const nativeResult = await requestNativePushPermissionDetailed();
+            if (nativeResult.status !== "granted") return null;
+
+            const token = nativeResult.token || null;
+            const targetUid = userId || auth.currentUser?.uid;
+            if (token && targetUid) {
+              const tokenId = btoa(token.slice(-36)).replace(/[/+=]/g, "_");
+              const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
+              await setDoc(tokenRef, {
+                id: tokenId,
+                userId: targetUid,
+                token,
+                platform: "android",
+                userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "android-native",
+                lastActiveAt: new Date().toISOString(),
+                updatedAt: serverTimestamp(),
+              }, { merge: true });
+            }
+            return token;
+          } catch {
+            return null;
+          }
+        }
+
+        if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") {
+          return null;
+        }
+        return requestNotificationPermission(userId);
       }
 
       const targetUid = userId || auth.currentUser?.uid;

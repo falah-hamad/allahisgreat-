@@ -6,14 +6,21 @@ import { isInvoiceOverdue } from "./utils/overdueUtils";
 import { useAuth } from "./contexts/AuthContext";
 import {
   setupForegroundNotificationListener,
-  registerDeviceToken,
+  syncNotificationTokenIfPermitted,
   subscribeAppNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
   clearAllNotifications,
 } from "./lib/notifications";
-import { authenticateWithBiometrics, isNativeAndroid, saveNativeJsonFile } from "./lib/native";
+import { authenticateWithBiometrics, ensureNativeNotificationChannel, isNativeAndroid, saveNativeJsonFile } from "./lib/native";
+import { FirstLaunchOnboarding, FirstUseCoachMarks } from "./components/FirstLaunchOnboarding";
+import {
+  isCoachMarksCompleted,
+  isFirstLaunchCompleted,
+  setCoachMarksCompleted,
+  setFirstLaunchCompleted,
+} from "./lib/firstLaunch";
 import AuthModal from "./components/AuthModal";
 import AccountManagerModal from "./components/AccountManagerModal";
 import NotificationCenterModal from "./components/NotificationCenterModal";
@@ -97,6 +104,8 @@ export default function App() {
   const hadBeenOfflineRef = useRef<boolean>(!navigator.onLine);
   const [nativeUnlockPending, setNativeUnlockPending] = useState(false);
   const [nativeUnlockError, setNativeUnlockError] = useState<string | null>(null);
+  const [showFirstLaunchOnboarding, setShowFirstLaunchOnboarding] = useState(false);
+  const [showCoachMarks, setShowCoachMarks] = useState(false);
 
   const isNativeBiometricLockEnabled = Boolean(currentUser && extendedProfile.twoFactorEnabled && isNativeAndroid());
 
@@ -125,6 +134,16 @@ export default function App() {
     );
     return false;
   }, [isNativeBiometricLockEnabled]);
+
+  useEffect(() => {
+    setShowFirstLaunchOnboarding(!isFirstLaunchCompleted());
+    setShowCoachMarks(isFirstLaunchCompleted() && !isCoachMarksCompleted());
+  }, []);
+
+  useEffect(() => {
+    if (!isNativeAndroid()) return;
+    void ensureNativeNotificationChannel();
+  }, []);
 
   useEffect(() => {
     let reconnectTimeout: any = null;
@@ -205,8 +224,8 @@ export default function App() {
         if (unsub) cleanupForeground = unsub;
       });
 
-      registerDeviceToken(currentUser.uid).catch((e) => {
-        console.warn("FCM device token registration notice:", e);
+      syncNotificationTokenIfPermitted(currentUser.uid).catch((e) => {
+        console.warn("FCM device token sync notice:", e);
       });
 
       // Subscribe to real-time synchronized Firestore in-app notifications
@@ -342,6 +361,19 @@ export default function App() {
     );
   }
 
+  if (showFirstLaunchOnboarding) {
+    return (
+      <FirstLaunchOnboarding
+        userId={currentUser?.uid}
+        onComplete={() => {
+          setFirstLaunchCompleted(true);
+          setShowFirstLaunchOnboarding(false);
+          setShowCoachMarks(!isCoachMarksCompleted());
+        }}
+      />
+    );
+  }
+
   // Prevent unauthenticated users from accessing internal application pages unless in guest mode
   if (!currentUser && !isGuest) {
     return <AuthModal onClose={() => continueAsGuest()} />;
@@ -395,6 +427,16 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-800 font-sans antialiased overflow-x-hidden">
+      {showCoachMarks && (
+        <FirstUseCoachMarks
+          currentTab={currentTab}
+          setCurrentTab={setCurrentTab}
+          onComplete={() => {
+            setCoachMarksCompleted(true);
+            setShowCoachMarks(false);
+          }}
+        />
+      )}
       
       {/* Sidebar Component */}
       <Sidebar
