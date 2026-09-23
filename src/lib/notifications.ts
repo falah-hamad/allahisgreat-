@@ -109,42 +109,6 @@ export async function requestNotificationPermissionDetailed(userId?: string): Pr
         };
       }
 
-      export async function syncNotificationTokenIfPermitted(userId?: string): Promise<string | null> {
-        if (isNativeAndroid()) {
-          try {
-            await ensureNativeNotificationChannel();
-            const permission = await PushNotifications.checkPermissions();
-            if (permission.receive !== "granted") return null;
-            const nativeResult = await requestNativePushPermissionDetailed();
-            if (nativeResult.status !== "granted") return null;
-
-            const token = nativeResult.token || null;
-            const targetUid = userId || auth.currentUser?.uid;
-            if (token && targetUid) {
-              const tokenId = btoa(token.slice(-36)).replace(/[/+=]/g, "_");
-              const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
-              await setDoc(tokenRef, {
-                id: tokenId,
-                userId: targetUid,
-                token,
-                platform: "android",
-                userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "android-native",
-                lastActiveAt: new Date().toISOString(),
-                updatedAt: serverTimestamp(),
-              }, { merge: true });
-            }
-            return token;
-          } catch {
-            return null;
-          }
-        }
-
-        if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") {
-          return null;
-        }
-        return requestNotificationPermission(userId);
-      }
-
       const targetUid = userId || auth.currentUser?.uid;
       if (targetUid) {
         const tokenId = btoa(nativeResult.token.slice(-36)).replace(/[/+=]/g, "_");
@@ -274,6 +238,43 @@ export async function requestNotificationPermissionDetailed(userId?: string): Pr
 export async function requestNotificationPermission(userId?: string): Promise<string | null> {
   const res = await requestNotificationPermissionDetailed(userId);
   return res.token || null;
+}
+
+export async function syncNotificationTokenIfPermitted(userId?: string): Promise<string | null> {
+  if (isNativeAndroid()) {
+    try {
+      await ensureNativeNotificationChannel();
+      const permission = await PushNotifications.checkPermissions();
+      if (permission.receive !== "granted") return null;
+      const nativeResult = await requestNativePushPermissionDetailed();
+      if (nativeResult.status !== "granted") return null;
+
+      const token = nativeResult.token || null;
+      const targetUid = userId || auth.currentUser?.uid;
+      if (token && targetUid) {
+        const tokenId = btoa(token.slice(-36)).replace(/[/+=]/g, "_");
+        const tokenRef = doc(db, "users", targetUid, "tokens", tokenId);
+        await setDoc(tokenRef, {
+          id: tokenId,
+          userId: targetUid,
+          token,
+          platform: "android",
+          userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "android-native",
+          lastActiveAt: new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+      return token;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") {
+    return null;
+  }
+
+  return requestNotificationPermission(userId);
 }
 
 export const registerDeviceToken = requestNotificationPermission;

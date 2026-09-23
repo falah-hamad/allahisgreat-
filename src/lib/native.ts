@@ -24,9 +24,9 @@ export async function takeNativePhoto() {
 
 export async function checkNativePermissionsStatus() {
   const result = {
-    notifications: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'unsupported',
-    camera: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'unsupported',
-    photos: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'unsupported',
+    notifications: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'unsupported',
+    camera: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'limited' | 'unsupported',
+    photos: 'unsupported' as 'granted' | 'denied' | 'prompt' | 'prompt-with-rationale' | 'limited' | 'unsupported',
     biometricAvailable: false,
   };
 
@@ -56,6 +56,35 @@ export async function requestNativeCameraAndPhotosPermission() {
     return { camera: 'unsupported', photos: 'unsupported' } as const;
   }
   return Camera.requestPermissions({ permissions: ['camera', 'photos'] });
+}
+
+export async function ensureNativeNotificationChannel() {
+  if (!isNativeAndroid()) return;
+  try {
+    await PushNotifications.createChannel({
+      id: 'accounting_alerts',
+      name: 'التنبيهات المحاسبية',
+      description: 'تنبيهات الديون والدفعات والنسخ الاحتياطي',
+      importance: 4,
+      visibility: 1,
+      sound: 'default',
+    });
+  } catch {
+    // Channel may already exist
+  }
+}
+
+export async function openNativeAppSettings() {
+  if (!isNativeAndroid()) return false;
+  try {
+    if (typeof (CapacitorApp as any).openSettings === 'function') {
+      await (CapacitorApp as any).openSettings();
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export async function pickNativeFiles(readData = false, limit = 10) {
@@ -208,32 +237,6 @@ export async function requestNativePushPermissionDetailed(): Promise<NativePushP
       status: 'unsupported',
       message: 'التسجيل الأصلي لإشعارات Android غير متاح في هذه البيئة.',
     };
-  }
-
-  export async function ensureNativeNotificationChannel() {
-    if (!isNativeAndroid()) return;
-    try {
-      await PushNotifications.createChannel({
-        id: 'accounting_alerts',
-        name: 'التنبيهات المحاسبية',
-        description: 'تنبيهات الديون والدفعات والنسخ الاحتياطي',
-        importance: 4,
-        visibility: 1,
-        sound: 'default',
-      });
-    } catch {
-      // Channel may already exist on some devices
-    }
-  }
-
-  export async function openNativeAppSettings() {
-    if (!isNativeAndroid()) return false;
-    try {
-      await CapacitorApp.openSettings();
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   let permission = await PushNotifications.checkPermissions();
