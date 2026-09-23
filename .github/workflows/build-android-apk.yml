@@ -21,7 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java (JDK 21 for Android/Gradle)
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -35,6 +35,9 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Verify Java version
+        run: java -version
 
       - name: Install dependencies
         run: npm ci
@@ -70,8 +73,8 @@ jobs:
             echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD"
           } >> "$GITHUB_ENV"
 
-      - name: Sync Capacitor Android project
-        run: npx cap sync android
+      - name: Build web assets and sync Capacitor Android project
+        run: npm run cap:sync
 
       - name: Build debug APK
         working-directory: android
