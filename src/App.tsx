@@ -141,6 +141,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const restartHandler = () => {
+      setShowFirstLaunchOnboarding(true);
+      setShowCoachMarks(false);
+    };
+    window.addEventListener("acc-restart-onboarding", restartHandler as EventListener);
+    return () => window.removeEventListener("acc-restart-onboarding", restartHandler as EventListener);
+  }, []);
+
+  useEffect(() => {
     if (!isNativeAndroid()) return;
     void ensureNativeNotificationChannel();
   }, []);
@@ -370,9 +379,14 @@ export default function App() {
     return (
       <FirstLaunchOnboarding
         userId={currentUser?.uid}
-        onComplete={() => {
+        onComplete={(options) => {
           setFirstLaunchCompleted(true);
           setShowFirstLaunchOnboarding(false);
+          if (options?.skipped) {
+            setCoachMarksCompleted(true);
+            setShowCoachMarks(false);
+            return;
+          }
           setShowCoachMarks(!isCoachMarksCompleted());
         }}
       />

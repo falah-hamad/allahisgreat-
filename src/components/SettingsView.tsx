@@ -489,18 +489,24 @@ export default function SettingsView({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <label className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
-            <span className="font-bold text-slate-700 flex items-center gap-1.5">
-              <Fingerprint className="w-4 h-4 text-purple-600" />
-              قفل التطبيق بالبصمة/Face Unlock
-            </span>
+          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                <Fingerprint className="w-4 h-4 text-purple-600" />
+                قفل التطبيق بالبصمة/Face Unlock
+              </span>
+              {(!isNativeAndroid() || !permissionStatus.biometric) && (
+                <p className="text-[10px] text-amber-700">غير متاح على هذا الجهاز حالياً.</p>
+              )}
+            </div>
             <input
               type="checkbox"
               checked={localBiometricLock}
+              disabled={!isNativeAndroid() || !permissionStatus.biometric}
               onChange={(e) => setLocalBiometricLock(e.target.checked)}
               className="w-4 h-4"
             />
-          </label>
+          </div>
 
           <label className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
             <span className="font-bold text-slate-700 flex items-center gap-1.5">
@@ -589,8 +595,8 @@ export default function SettingsView({
             type="button"
             onClick={() => {
               resetFirstLaunchExperience();
-              showMsg("success", "تمت إعادة تهيئة دليل البداية. سيظهر الشرح عند الفتح التالي.");
-              setTimeout(() => window.location.reload(), 500);
+              showMsg("success", "تمت إعادة تهيئة دليل البداية وسيظهر الشرح مباشرة.");
+              window.dispatchEvent(new Event("acc-restart-onboarding"));
             }}
             className="px-4 py-2 rounded-lg border border-blue-300 text-blue-700 text-xs font-bold hover:bg-blue-50"
           >

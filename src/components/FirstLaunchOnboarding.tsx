@@ -59,7 +59,7 @@ const onboardingSlides: OnboardingSlide[] = [
 
 interface FirstLaunchOnboardingProps {
   userId?: string | null;
-  onComplete: () => void;
+  onComplete: (options?: { skipped?: boolean }) => void;
 }
 
 export function FirstLaunchOnboarding({ userId, onComplete }: FirstLaunchOnboardingProps) {
@@ -118,7 +118,7 @@ export function FirstLaunchOnboarding({ userId, onComplete }: FirstLaunchOnboard
   const handleNext = async () => {
     await handlePermissionAction();
     if (index >= onboardingSlides.length - 1) {
-      onComplete();
+      onComplete({ skipped: false });
       return;
     }
     setMessage(null);
@@ -157,7 +157,7 @@ export function FirstLaunchOnboarding({ userId, onComplete }: FirstLaunchOnboard
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={onComplete}
+            onClick={() => onComplete({ skipped: true })}
             className="flex-1 px-4 py-2.5 rounded-xl border border-slate-500 text-slate-200 text-sm font-bold hover:bg-slate-700 transition-colors"
           >
             تخطي
@@ -248,9 +248,11 @@ export function FirstUseCoachMarks({ currentTab, setCurrentTab, onComplete }: Fi
       setTargetRect(el ? el.getBoundingClientRect() : null);
     };
     updateRect();
+    const timer = window.setTimeout(updateRect, 150);
     window.addEventListener("resize", updateRect);
     window.addEventListener("scroll", updateRect, true);
     return () => {
+      window.clearTimeout(timer);
       window.removeEventListener("resize", updateRect);
       window.removeEventListener("scroll", updateRect, true);
     };
