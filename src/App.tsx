@@ -361,6 +361,11 @@ export default function App() {
     );
   }
 
+  // Prevent unauthenticated users from accessing internal application pages unless in guest mode
+  if (!currentUser && !isGuest) {
+    return <AuthModal onClose={() => continueAsGuest()} />;
+  }
+
   if (showFirstLaunchOnboarding) {
     return (
       <FirstLaunchOnboarding
@@ -372,11 +377,6 @@ export default function App() {
         }}
       />
     );
-  }
-
-  // Prevent unauthenticated users from accessing internal application pages unless in guest mode
-  if (!currentUser && !isGuest) {
-    return <AuthModal onClose={() => continueAsGuest()} />;
   }
 
   if (loading) {

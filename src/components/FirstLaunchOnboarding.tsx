@@ -97,8 +97,12 @@ export function FirstLaunchOnboarding({ userId, onComplete }: FirstLaunchOnboard
       setBusy(true);
       try {
         const permissions = await requestNativeCameraAndPhotosPermission();
-        if (permissions.camera === "granted") {
-          setMessage("تم منح إذن الكاميرا بنجاح.");
+        if (permissions.camera === "granted" || permissions.photos === "granted" || permissions.photos === "limited") {
+          setMessage(
+            permissions.camera === "granted"
+              ? "تم منح إذن الكاميرا/الصور بنجاح."
+              : "تم منح إذن الصور. يمكنك استخدام اختيار الملفات حتى لو لم تمنح الكاميرا حالياً.",
+          );
         } else {
           setMessage("تم رفض إذن الكاميرا/الصور. التطبيق سيستمر ويمكن التفعيل لاحقاً.");
         }
