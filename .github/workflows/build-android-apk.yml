@@ -1,6 +1,9 @@
 name: Build Android artifacts
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -55,6 +58,9 @@ jobs:
             echo "has_signing=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build web assets
+        run: npm run build
+
       - name: Inject google-services.json when provided
         if: ${{ steps.detect-android-config.outputs.has_google_services == 'true' }}
         run: printf '%s' "$ANDROID_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > android/app/google-services.json
@@ -76,6 +82,7 @@ jobs:
       - name: Build debug APK
         working-directory: android
         run: |
+          java -version
           chmod +x ./gradlew
           ./gradlew assembleDebug --stacktrace
 
